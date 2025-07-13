@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 8000;
 
 // Load environment variables (e.g., JWT_SECRET, EMAIL_USER, EMAIL_PASS)
 // In a real app, use a .env file and dotenv package: require('dotenv').config();
+// For Render, these should be set directly in Render's environment variables.
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key'; // CHANGE THIS IN PRODUCTION!
 const EMAIL_USER = process.env.EMAIL_USER || 'your_email@gmail.com'; // Your email address for Nodemailer
 const EMAIL_PASS = process.env.EMAIL_PASS || 'your_email_password_or_app_password'; // Your email password/app password
@@ -23,6 +24,7 @@ const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'your_support_email@example.c
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Note: /uploads static serving is kept if you intend to serve uploaded images directly from backend
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Create 'uploads' directory if it doesn't exist
@@ -523,15 +525,6 @@ try {
   });
 } catch (e) { console.error('Error defining /api/support POST route:', e); }
 
-
-// Serve static files from the React app in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'client/build')));
-
-  app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
-  });
-}
 
 // Start the server
 app.listen(PORT, () => {
