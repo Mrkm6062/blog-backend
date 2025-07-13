@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 const app = express();
+// Use process.env.PORT for Render, fallback to 8000 for local
 const PORT = process.env.PORT || 8000;
 
 // Load environment variables (e.g., JWT_SECRET, EMAIL_USER, EMAIL_PASS)
@@ -31,7 +32,8 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // MongoDB Connection
-const mongoURI = 'mongodb://localhost:27017/blogdb';
+// Use MONGODB_URI from environment variables for deployment
+const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/blogdb';
 
 mongoose.connect(mongoURI)
   .then(() => console.log('MongoDB connected successfully!'))
@@ -218,7 +220,7 @@ app.get('/api/posts', async (req, res) => {
 });
 
 // GET a single post by ID
-app.get('/api/posts/:id', async (req, res) => {
+app.get('/api/posts/:id', async (req, res) => { // Correct: ':id' is a named parameter
   try {
     const post = await Post.findById(req.params.id);
     if (!post) {
@@ -242,10 +244,10 @@ app.post('/api/posts', authMiddleware, upload.single('thumbnail'), async (req, r
 
   // Get author and userId from the authenticated user
   const author = req.user.username;
-  const userId = req.user.id; // This is where userId is retrieved from the JWT
+  const userId = req.user.id;
 
-  console.log('POST /api/posts: req.user.id (from JWT):', userId); // DEBUG LOG
-  console.log('POST /api/posts: req.user.username (from JWT):', author); // DEBUG LOG
+  console.log('POST /api/posts: req.user.id (from JWT):', userId);
+  console.log('POST /api/posts: req.user.username (from JWT):', author);
 
 
   let finalThumbnailUrl = thumbnailUrlFromForm;
@@ -274,7 +276,7 @@ app.post('/api/posts', authMiddleware, upload.single('thumbnail'), async (req, r
     });
 
     const savedPost = await newPost.save();
-    console.log('POST /api/posts: Saved Post:', savedPost); // DEBUG LOG: Check the saved post object
+    console.log('POST /api/posts: Saved Post:', savedPost);
     res.status(201).json(savedPost);
   } catch (err) {
     console.error('Error creating post:', err);
@@ -289,7 +291,7 @@ app.post('/api/posts', authMiddleware, upload.single('thumbnail'), async (req, r
 });
 
 // UPDATE a post by ID with optional image upload (protected by authMiddleware)
-app.put('/api/posts/:id', authMiddleware, upload.single('thumbnail'), async (req, res) => {
+app.put('/api/posts/:id', authMiddleware, upload.single('thumbnail'), async (req, res) => { // Correct: ':id' is a named parameter
   const { title, content, category } = req.body;
   const thumbnailUrlFromForm = req.body.thumbnailUrl;
   const uploadedFile = req.file;
@@ -357,7 +359,7 @@ app.put('/api/posts/:id', authMiddleware, upload.single('thumbnail'), async (req
 });
 
 // DELETE a post by ID (protected by authMiddleware)
-app.delete('/api/posts/:id', authMiddleware, async (req, res) => {
+app.delete('/api/posts/:id', authMiddleware, async (req, res) => { // Correct: ':id' is a named parameter
   try {
     const post = await Post.findById(req.params.id);
     if (!post) {
@@ -392,7 +394,7 @@ app.delete('/api/posts/:id', authMiddleware, async (req, res) => {
 // API Routes for Comments
 
 // GET comments for a specific post
-app.get('/api/posts/:postId/comments', async (req, res) => {
+app.get('/api/posts/:postId/comments', async (req, res) => { // Correct: ':postId' is a named parameter
   try {
     const comments = await Comment.find({ postId: req.params.postId }).sort({ createdAt: 1 });
     res.json(comments);
@@ -403,7 +405,7 @@ app.get('/api/posts/:postId/comments', async (req, res) => {
 });
 
 // CREATE a new comment for a specific post (protected by authMiddleware)
-app.post('/api/posts/:postId/comments', authMiddleware, async (req, res) => {
+app.post('/api/posts/:postId/comments', authMiddleware, async (req, res) => { // Correct: ':postId' is a named parameter
   const { content } = req.body;
   const { postId } = req.params;
 
@@ -433,7 +435,7 @@ app.post('/api/posts/:postId/comments', authMiddleware, async (req, res) => {
 });
 
 // DELETE a comment by ID (protected by authMiddleware)
-app.delete('/api/posts/:postId/comments/:commentId', authMiddleware, async (req, res) => {
+app.delete('/api/posts/:postId/comments/:commentId', authMiddleware, async (req, res) => { // Correct: Both are named parameters
   try {
     const comment = await Comment.findById(req.params.commentId);
     if (!comment) {
