@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const Post = require('../models/Post'); // Adjust path as needed
+const Post = require('../models/post'); // Adjust path as needed
 
 // GET all posts
 router.get('/', async (req, res) => {
