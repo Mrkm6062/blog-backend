@@ -1,222 +1,534 @@
-const dotenv = require('dotenv');
-dotenv.config();
-
-console.log('--- Loaded Environment Variables ---');
-Object.keys(process.env).forEach(key => {
-  console.log(`${key} = ${process.env[key]}`);
-});
-console.log('------------------------------------');
-
-// Rest of your server.js below...
+// server.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
-const nodemailer = require('nodemailer');
-const multer = require('multer');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const postRoutes = require('./routes/posts'); // ✅ Externalized post routes
+const dotenv = require('dotenv');
+const bcrypt = require('bcryptjs'); // For password hashing
+const jwt = require('jsonwebtoken'); // For JSON Web Tokens
+const multer = require('multer'); // For handling file uploads
+const fs = require('fs'); // For file system operations (e.g., creating directories)
+
+dotenv.config(); // Load environment variables from .env file
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// // Google Cloud Storage Setup
-// const { Storage } = require('@google-cloud/storage');
-// let storageClient;
-// const bucketName = process.env.GCS_BUCKET_NAME;
+// --- File Uploads Setup (Multer) ---
+const uploadsDir = path.join(__dirname, 'uploads');
 
-// if (process.env.GCP_SA_KEY) {
-//   try {
-//     const key = JSON.parse(process.env.GCP_SA_KEY);
-//     storageClient = new Storage({
-//       credentials: {
-//         client_email: key.client_email,
-//         private_key: key.private_key.replace(/\\n/g, '\n'),
-//       },
-//       projectId: key.project_id,
-//     });
-//     console.log('GCS initialized using GCP_SA_KEY.');
-//   } catch (e) {
-//     console.error('Error parsing GCP_SA_KEY:', e.message);
-//     storageClient = null;
-//   }
-// } else {
-//   try {
-//     storageClient = new Storage();
-//     console.log('GCS initialized using GOOGLE_APPLICATION_CREDENTIALS.');
-//   } catch (e) {
-//     console.error('GCS not configured:', e.message);
-//     storageClient = null;
-//   }
-// }
+// Create 'uploads' directory if it doesn't exist
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
 
-// if (!bucketName && storageClient) {
-//   console.error('GCS_BUCKET_NAME missing.');
-// }
-
-// const upload = multer({
-//   storage: multer.memoryStorage(),
-//   limits: { fileSize: 5 * 1024 * 1024 },
-// });
-
-const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/blogdb';
-mongoose.connect(mongoURI)
-  .then(() => console.log('MongoDB connected.'))
-  .catch(err => console.error('MongoDB error:', err.message));
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+// Configure multer for disk storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir); // Files will be saved in the 'uploads' directory
   },
+  filename: (req, file, cb) => {
+    // Generate a unique filename using the current timestamp and original extension
+    cb(null, Date.now() + '-' + file.originalname);
+  }
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@example.com';
+const upload = multer({ storage: storage });
 
-const authMiddleware = (req, res, next) => {
-  const token = req.header('Authorization');
-  if (!token) return res.status(401).json({ message: 'No token provided.' });
+// Serve static files from the 'uploads' directory
+app.use('/uploads', express.static(uploadsDir));
 
-  try {
-    const decoded = jwt.verify(token.split(' ')[1], JWT_SECRET);
-    req.user = decoded.user;
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid token.' });
-  }
-};
+// MongoDB Connection
+const mongoURI = process.env.MONGO_URI || 'mongodb://localhost:27017/blogdb';
 
-// User Model
+mongoose.connect(mongoURI)
+  .then(() => console.log('MongoDB connected successfully!'))
+  .catch(err => console.error('MongoDB connection error:', err));
+
+// --- Mongoose Schemas and Models ---
+
+// Define User Schema and Model
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true, trim: true },
-  password: { type: String, required: true },
-  name: { type: String, required: true, trim: true },
-  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-  number: { type: String, required: true, trim: true },
-}, { timestamps: true });
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+  name: { // New field
+    type: String,
+    required: true,
+    trim: true,
+  },
+  email: { // New field
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true,
+  },
+  number: { // New field
+    type: String,
+    required: true,
+    trim: true,
+  },
+}, {
+  timestamps: true,
+});
 
 const User = mongoose.model('User', userSchema);
 
-// Comment Model
+// Define Blog Post Schema and Model
+const postSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  author: { // This will now typically be the username of the creator
+    type: String,
+    required: true,
+    trim: true,
+  },
+  userId: { // New field to link post to the user who created it
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+  },
+  date: {
+    type: String,
+    required: true,
+  },
+  content: {
+    type: String, // Storing HTML content from ReactQuill
+    required: true,
+  },
+  thumbnailUrl: {
+    type: String,
+    default: '',
+  },
+  category: {
+    type: String,
+    enum: ['Fitness', 'Health', 'Travel', 'Fashion', 'Other'],
+    default: 'Other',
+    required: true,
+  },
+}, {
+  timestamps: true,
+});
+
+const Post = mongoose.model('Post', postSchema);
+
+// Define Comment Schema and Model
 const commentSchema = new mongoose.Schema({
-  postId: { type: mongoose.Schema.Types.ObjectId, ref: 'Post', required: true },
-  author: { type: String, required: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  content: { type: String, required: true },
-  date: { type: String, required: true },
-}, { timestamps: true });
+  postId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Post',
+    required: true,
+  },
+  author: { // This will now typically be the username of the commenter
+    type: String,
+    required: true,
+    trim: true,
+  },
+  userId: { // New field to link comment to the user who created it (optional, but good for moderation)
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  content: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  date: {
+    type: String,
+    required: true,
+  },
+}, {
+  timestamps: true,
+});
 
 const Comment = mongoose.model('Comment', commentSchema);
 
-// Support Request Model
-const supportSchema = new mongoose.Schema({
-  name: String,
-  email: String,
-  message: String,
-}, { timestamps: true });
+// --- Authentication Middleware ---
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-const SupportRequest = mongoose.model('SupportRequest', supportSchema);
-
-// Auth Routes
-app.post('/api/register', async (req, res) => {
-  const { username, password, name, email, number } = req.body;
-  try {
-    let user = await User.findOne({ $or: [{ username }, { email }] });
-    if (user) return res.status(400).json({ message: 'User exists.' });
-
-    const hashed = await bcrypt.hash(password, 10);
-    user = new User({ username, password: hashed, name, email, number });
-    await user.save();
-    res.status(201).json({ message: 'Registered.' });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', details: err.message });
+  if (token == null) {
+    return res.status(401).json({ message: 'Authentication token required' });
   }
-});
 
-app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) {
+      console.error('JWT verification error:', err);
+      return res.status(403).json({ message: 'Invalid or expired token' });
+    }
+    req.user = user; // Attach user payload (e.g., { id: 'userId', username: 'testuser' }) to request
+    next();
+  });
+};
+
+// --- API Routes ---
+
+// User Registration
+app.post('/api/register', async (req, res) => {
+  const { username, password, name, email, number } = req.body; // Destructure new fields
+
+  if (!username || !password || !name || !email || !number) { // Validate new fields
+    return res.status(400).json({ message: 'Username, password, name, email, and number are all required.' });
+  }
+
   try {
-    const user = await User.findOne({ username });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(400).json({ message: 'Invalid credentials' });
+    const existingUserByUsername = await User.findOne({ username });
+    if (existingUserByUsername) {
+      return res.status(409).json({ message: 'Username already exists.' });
     }
 
-    const token = jwt.sign({ user: { id: user.id, username: user.username } }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token, username: user.username, userId: user.id });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', details: err.message });
-  }
-});
+    const existingUserByEmail = await User.findOne({ email });
+    if (existingUserByEmail) {
+      return res.status(409).json({ message: 'Email already exists.' });
+    }
 
-// Use external postRoutes
-app.use('/api/posts', postRoutes);
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-// Support Request Route
-app.post('/api/support', async (req, res) => {
-  const { name, email, message } = req.body;
-  if (!name || !email || !message) {
-    return res.status(400).json({ message: 'All fields required.' });
-  }
-
-  try {
-    await new SupportRequest({ name, email, message }).save();
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: SUPPORT_EMAIL,
-      subject: `Support Request from ${name}`,
-      html: `<p>${message}</p><p>From: ${name} (${email})</p>`,
+    const newUser = new User({
+      username,
+      password: hashedPassword,
+      name,   // Save new field
+      email,  // Save new field
+      number, // Save new field
     });
 
-    res.status(201).json({ message: 'Support request sent.' });
+    await newUser.save();
+    res.status(201).json({ message: 'User registered successfully!' });
   } catch (err) {
-    res.status(500).json({ message: 'Error sending support request.', details: err.message });
+    console.error('Error during registration:', err);
+    res.status(500).json({ message: 'Server error during registration.', details: err.message });
   }
 });
 
-// Function to log all routes safely
-function logRoutes(app) {
-  if (!app._router) {
-    console.log('⚠️ No routes registered yet (app._router is undefined)');
-    return;
+// User Login
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Username and password are required.' });
   }
 
-  const routes = [];
-  app._router.stack.forEach((middleware) => {
-    if (middleware.route) {
-      // Direct route on app
-      routes.push(`${Object.keys(middleware.route.methods).join(', ').toUpperCase()} ${middleware.route.path}`);
-    } else if (middleware.name === 'router' && middleware.handle.stack) {
-      // Router middleware
-      middleware.handle.stack.forEach((handler) => {
-        if (handler.route) {
-          const method = Object.keys(handler.route.methods).join(', ').toUpperCase();
-          routes.push(`${method} ${handler.route.path}`);
-        }
-      });
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
     }
-  });
 
-  console.log('\n🔍 [DEBUG] All Registered Routes:');
-  routes.forEach((r, i) => console.log(`  [${i}] ${r}`));
-  console.log('--------------------------------------\n');
-}
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
 
-// Call route logger AFTER all routes are registered
-logRoutes(app);
+    // Generate JWT
+    const token = jwt.sign(
+      { id: user._id, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' } // Token expires in 1 hour
+    );
 
-// Serve React frontend in production
+    res.json({ message: 'Logged in successfully!', token, username: user.username, userId: user._id });
+  } catch (err) {
+    console.error('Error during login:', err);
+    res.status(500).json({ message: 'Server error during login.', details: err.message });
+  }
+});
+
+
+// --- Blog Post Routes ---
+
+// GET all posts (with optional category, search, and pagination)
+app.get('/api/posts', async (req, res) => {
+  try {
+    const { category, search, page = 1, limit = 4, sortBy = 'createdAt', sortOrder = 'desc' } = req.query; // Added sortBy and sortOrder
+    let filter = {};
+    let sort = {};
+
+    if (category && category !== 'All') {
+      filter.category = category;
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      filter.$or = [
+        { title: { $regex: searchRegex } },
+        { author: { $regex: searchRegex } },
+        { content: { $regex: searchRegex } }
+      ];
+    }
+
+    // Dynamic Sorting
+    if (sortBy) {
+      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const postsQuery = Post.find(filter)
+                            .sort(sort) // Apply dynamic sort
+                            .skip(skip)
+                            .limit(parseInt(limit));
+
+    const [posts, totalPosts] = await Promise.all([
+      postsQuery.exec(),
+      Post.countDocuments(filter)
+    ]);
+
+    res.json({ posts, totalPosts });
+  } catch (err) {
+    console.error('Error fetching posts:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET a single post by ID
+app.get('/api/posts/:id', async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    res.json(post);
+  } catch (err) {
+    console.error('Error fetching single post:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Post ID format' });
+    }
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// CREATE a new post (PROTECTED)
+app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body;
+  const author = req.user.username; // Author is now derived from authenticated user
+  const userId = req.user.id; // Store userId of the creator
+
+  if (!title || !content) {
+    return res.status(400).json({ message: 'Please enter all fields: title and content.' });
+  }
+
+  let finalThumbnailUrl = externalThumbnailUrl || ''; // Start with external URL if provided
+
+  // If a file was uploaded, override the external URL
+  if (req.file) {
+    // Multer saves the file, req.file.filename is the unique name
+    finalThumbnailUrl = `/uploads/${req.file.filename}`;
+  }
+
+  try {
+    const newPost = new Post({
+      title,
+      author,
+      userId, // Save the userId
+      date: new Date().toISOString().split('T')[0],
+      content,
+      thumbnailUrl: finalThumbnailUrl, // Use the determined thumbnail URL
+      category: category || 'Other',
+    });
+
+    const savedPost = await newPost.save();
+    res.status(201).json(savedPost);
+  } catch (err) {
+    console.error('Error creating post:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+// UPDATE a post by ID (PROTECTED - only owner can update)
+app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body; // Removed author as it's fixed by userId
+
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    // Authorization check: Only the owner can update the post
+    if (post.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Unauthorized: You can only update your own posts.' });
+    }
+
+    let finalThumbnailUrl = post.thumbnailUrl; // Default to existing URL
+
+    // If a new file was uploaded, update the thumbnail URL
+    if (req.file) {
+      // Delete old uploaded file if it exists
+      if (post.thumbnailUrl && post.thumbnailUrl.startsWith('/uploads/')) {
+        const oldFilePath = path.join(uploadsDir, path.basename(post.thumbnailUrl));
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+      finalThumbnailUrl = `/uploads/${req.file.filename}`;
+    } else if (externalThumbnailUrl !== undefined) {
+      // If externalThumbnailUrl is explicitly provided (even if empty string), use it
+      // This handles cases where user clears the URL or provides a new one
+      finalThumbnailUrl = externalThumbnailUrl;
+      // If an old uploaded file existed and is now being replaced by an external URL or cleared, delete it
+      if (post.thumbnailUrl && post.thumbnailUrl.startsWith('/uploads/')) {
+        const oldFilePath = path.join(uploadsDir, path.basename(post.thumbnailUrl));
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+    }
+    // If neither req.file nor externalThumbnailUrl is provided, finalThumbnailUrl remains the old one.
+
+    const updatedPost = await Post.findByIdAndUpdate(
+      req.params.id,
+      {
+        title,
+        content,
+        thumbnailUrl: finalThumbnailUrl, // Use the determined thumbnail URL
+        category
+      },
+      { new: true, runValidators: true }
+    );
+
+    res.json(updatedPost);
+  } catch (err) {
+    console.error('Error updating post:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Post ID format' });
+    }
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+// DELETE a post by ID (PROTECTED - only owner can delete)
+app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    // Authorization check: Only the owner can delete the post
+    if (post.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Unauthorized: You can only delete your own posts.' });
+    }
+
+    // Delete associated thumbnail file if it was uploaded locally
+    if (post.thumbnailUrl && post.thumbnailUrl.startsWith('/uploads/')) {
+      const filePath = path.join(uploadsDir, path.basename(post.thumbnailUrl));
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath); // Synchronously delete the file
+      }
+    }
+
+    await Post.findByIdAndDelete(req.params.id);
+    // Optionally, delete associated comments when a post is deleted
+    await Comment.deleteMany({ postId: req.params.id });
+    res.json({ message: 'Post deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting post:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Post ID format' });
+    }
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// --- Comment Routes ---
+
+// GET comments for a specific post
+app.get('/api/posts/:postId/comments', async (req, res) => {
+  try {
+    const comments = await Comment.find({ postId: req.params.postId }).sort({ createdAt: 1 });
+    res.json(comments);
+  } catch (err) {
+    console.error('Error fetching comments:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// CREATE a new comment for a specific post (PROTECTED)
+app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
+  const { content } = req.body;
+  const { postId } = req.params;
+  const author = req.user.username; // Author is now derived from authenticated user
+  const userId = req.user.id; // Store userId of the commenter
+
+  if (!content) {
+    return res.status(400).json({ message: 'Content is required for the comment.' });
+  }
+
+  try {
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    const newComment = new Comment({
+      postId,
+      author,
+      userId, // Save the userId
+      content,
+      date: new Date().toISOString().split('T')[0],
+    });
+
+    const savedComment = await newComment.save();
+    res.status(201).json(savedComment);
+  } catch (err) {
+    console.error('Error creating comment:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+// DELETE a comment by ID (PROTECTED - only owner can delete)
+app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+
+    const comment = await Comment.findById(commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    // Authorization check: Only the owner of the comment can delete it
+    if (comment.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Unauthorized: You can only delete your own comments.' });
+    }
+
+    await Comment.findByIdAndDelete(commentId);
+    res.json({ message: 'Comment deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting comment:', err);
+    if (err.kind === 'ObjectId') {
+      return res.status(400).json({ message: 'Invalid Comment ID format' });
+    }
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+// Serve static files from the React app in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'client/build')));
-  app.get('*', (req, res) =>
-    res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'))
-  );
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
+  });
 }
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
