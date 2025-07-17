@@ -1,4 +1,13 @@
-// server.js
+const dotenv = require('dotenv');
+dotenv.config();
+
+console.log('--- Loaded Environment Variables ---');
+Object.keys(process.env).forEach(key => {
+  console.log(`${key} = ${process.env[key]}`);
+});
+console.log('------------------------------------');
+
+// Rest of your server.js below...
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -7,7 +16,6 @@ const nodemailer = require('nodemailer');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const dotenv = require('dotenv');
 const postRoutes = require('./routes/posts'); // ✅ Externalized post routes
 
 dotenv.config();
