@@ -1,4 +1,4 @@
-// backend/models/Post.js (or wherever your Post model is defined)
+// server/models/Post.js (or wherever your Post model is defined)
 
 const mongoose = require('mongoose');
 
