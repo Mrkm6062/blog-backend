@@ -6,8 +6,6 @@ const path = require('path');
 const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs'); // For password hashing
 const jwt = require('jsonwebtoken'); // For JSON Web Tokens
-const multer = require('multer'); // For handling file uploads
-const fs = require('fs'); // For file system operations (e.g., creating directories)
 
 dotenv.config(); // Load environment variables from .env file
 
@@ -17,30 +15,6 @@ const PORT = process.env.PORT || 8000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// --- File Uploads Setup (Multer) ---
-const uploadsDir = path.join(__dirname, 'uploads');
-
-// Create 'uploads' directory if it doesn't exist
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
-
-// Configure multer for disk storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir); // Files will be saved in the 'uploads' directory
-  },
-  filename: (req, file, cb) => {
-    // Generate a unique filename using the current timestamp and original extension
-    cb(null, Date.now() + '-' + file.originalname);
-  }
-});
-
-const upload = multer({ storage: storage });
-
-// Serve static files from the 'uploads' directory
-app.use('/uploads', express.static(uploadsDir));
 
 // MongoDB Connection
 const mongoURI = process.env.MONGO_URI || 'mongodb://localhost:27017/blogdb';
@@ -314,21 +288,13 @@ app.get('/api/posts/:id', async (req, res) => {
 });
 
 // CREATE a new post (PROTECTED)
-app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body;
+app.post('/api/posts', authenticateToken, async (req, res) => {
+  const { title, content, thumbnailUrl, category } = req.body;
   const author = req.user.username; // Author is now derived from authenticated user
   const userId = req.user.id; // Store userId of the creator
 
   if (!title || !content) {
     return res.status(400).json({ message: 'Please enter all fields: title and content.' });
-  }
-
-  let finalThumbnailUrl = externalThumbnailUrl || ''; // Start with external URL if provided
-
-  // If a file was uploaded, override the external URL
-  if (req.file) {
-    // Multer saves the file, req.file.filename is the unique name
-    finalThumbnailUrl = `/uploads/${req.file.filename}`;
   }
 
   try {
@@ -338,7 +304,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
       userId, // Save the userId
       date: new Date().toISOString().split('T')[0],
       content,
-      thumbnailUrl: finalThumbnailUrl, // Use the determined thumbnail URL
+      thumbnailUrl: thumbnailUrl || '',
       category: category || 'Other',
     });
 
@@ -351,8 +317,8 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
 });
 
 // UPDATE a post by ID (PROTECTED - only owner can update)
-app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body; // Removed author as it's fixed by userId
+app.put('/api/posts/:id', authenticateToken, async (req, res) => {
+  const { title, content, thumbnailUrl, category } = req.body; // Removed author as it's fixed by userId
 
   try {
     const post = await Post.findById(req.params.id);
@@ -365,40 +331,9 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
       return res.status(403).json({ message: 'Unauthorized: You can only update your own posts.' });
     }
 
-    let finalThumbnailUrl = post.thumbnailUrl; // Default to existing URL
-
-    // If a new file was uploaded, update the thumbnail URL
-    if (req.file) {
-      // Delete old uploaded file if it exists
-      if (post.thumbnailUrl && post.thumbnailUrl.startsWith('/uploads/')) {
-        const oldFilePath = path.join(uploadsDir, path.basename(post.thumbnailUrl));
-        if (fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath);
-        }
-      }
-      finalThumbnailUrl = `/uploads/${req.file.filename}`;
-    } else if (externalThumbnailUrl !== undefined) {
-      // If externalThumbnailUrl is explicitly provided (even if empty string), use it
-      // This handles cases where user clears the URL or provides a new one
-      finalThumbnailUrl = externalThumbnailUrl;
-      // If an old uploaded file existed and is now being replaced by an external URL or cleared, delete it
-      if (post.thumbnailUrl && post.thumbnailUrl.startsWith('/uploads/')) {
-        const oldFilePath = path.join(uploadsDir, path.basename(post.thumbnailUrl));
-        if (fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath);
-        }
-      }
-    }
-    // If neither req.file nor externalThumbnailUrl is provided, finalThumbnailUrl remains the old one.
-
     const updatedPost = await Post.findByIdAndUpdate(
       req.params.id,
-      {
-        title,
-        content,
-        thumbnailUrl: finalThumbnailUrl, // Use the determined thumbnail URL
-        category
-      },
+      { title, content, thumbnailUrl, category },
       { new: true, runValidators: true }
     );
 
@@ -423,14 +358,6 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
     // Authorization check: Only the owner can delete the post
     if (post.userId.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Unauthorized: You can only delete your own posts.' });
-    }
-
-    // Delete associated thumbnail file if it was uploaded locally
-    if (post.thumbnailUrl && post.thumbnailUrl.startsWith('/uploads/')) {
-      const filePath = path.join(uploadsDir, path.basename(post.thumbnailUrl));
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath); // Synchronously delete the file
-      }
     }
 
     await Post.findByIdAndDelete(req.params.id);
