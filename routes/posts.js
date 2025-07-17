@@ -16,16 +16,19 @@ router.get('/', async (req, res) => {
 
 // GET a single post by ID
 router.get('/:id', async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: 'Invalid post ID' });
+  }
+
   try {
     const post = await Post.findById(req.params.id);
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ message: 'Post not found' });
     res.json(post);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: 'Server error', details: err.message });
   }
 });
+
 
 // POST a new post
 router.post('/', async (req, res) => {

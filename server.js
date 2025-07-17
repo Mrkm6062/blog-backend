@@ -157,16 +157,25 @@ app.post('/api/login', async (req, res) => {
 });
 
 // External Post & Comment Routes
-console.log("--- Debug: postRoutes mount check ---");
-if (postRoutes?.stack?.length) {
+// 🔍 Inspect and log each route in postRoutes
+if (postRoutes && postRoutes.stack) {
+  console.log('--- Registered Routes in postRoutes ---');
   postRoutes.stack.forEach((layer, i) => {
-    const routePath = layer.route?.path || '(middleware)';
-    const methods = layer.route?.methods ? Object.keys(layer.route.methods).join(', ') : 'N/A';
-    console.log(`  Route ${i + 1}: ${methods.toUpperCase()} ${routePath}`);
+    if (layer.route) {
+      const routePath = layer.route.path;
+      const methods = Object.keys(layer.route.methods).join(', ').toUpperCase();
+      console.log(`  [${i}] ${methods} ${routePath}`);
+    } else if (layer.name === 'router') {
+      console.log(`  [${i}] Nested Router`);
+    } else {
+      console.log(`  [${i}] Middleware`);
+    }
   });
+  console.log('----------------------------------------');
 } else {
-  console.log("No routes found in postRoutes.");
+  console.log('⚠️ postRoutes has no stack. Is it empty or not a router?');
 }
+
 
 app.use('/api/posts', postRoutes);
 
