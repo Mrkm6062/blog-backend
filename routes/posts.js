@@ -1,4 +1,4 @@
-// backend/routes/posts.js (or similar)
+// backend/routes/posts.js
 
 const express = require('express');
 const router = express.Router();
@@ -29,9 +29,8 @@ router.get('/:id', async (req, res) => {
 
 // POST a new post
 router.post('/', async (req, res) => {
-  const { title, author, content, thumbnailUrl, category } = req.body; // Destructure new fields
+  const { title, author, content, thumbnailUrl, category } = req.body;
 
-  // Basic validation
   if (!title || !author || !content) {
     return res.status(400).json({ message: 'Title, author, and content are required.' });
   }
@@ -40,8 +39,9 @@ router.post('/', async (req, res) => {
     title,
     author,
     content,
-    thumbnailUrl: thumbnailUrl || '', // Use provided or default to empty string
-    category: category || 'Other', // Use provided or default to 'Other'
+    thumbnailUrl: thumbnailUrl || '',
+    category: category || 'Other',
+    date: new Date().toISOString().split('T')[0]
   });
 
   try {
@@ -55,22 +55,18 @@ router.post('/', async (req, res) => {
 // PUT (Update) an existing post
 router.put('/:id', async (req, res) => {
   try {
-    const { title, author, content, thumbnailUrl, category } = req.body; // Destructure new fields
+    const { title, author, content, thumbnailUrl, category } = req.body;
+
     const updatedPost = await Post.findByIdAndUpdate(
       req.params.id,
-      {
-        title,
-        author,
-        content,
-        thumbnailUrl, // Update thumbnail URL
-        category,     // Update category
-      },
-      { new: true, runValidators: true } // Return the updated document and run schema validators
+      { title, author, content, thumbnailUrl, category },
+      { new: true, runValidators: true }
     );
 
     if (!updatedPost) {
       return res.status(404).json({ message: 'Post not found' });
     }
+
     res.json(updatedPost);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -84,6 +80,7 @@ router.delete('/:id', async (req, res) => {
     if (!deletedPost) {
       return res.status(404).json({ message: 'Post not found' });
     }
+
     res.json({ message: 'Post deleted successfully' });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -91,9 +88,9 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST a new comment to a post
-router.post('/:id/comments', async (req, res) => {
+router.post('/:postId/comments', async (req, res) => {
   try {
-    const post = await Post.findById(req.params.id);
+    const post = await Post.findById(req.params.postId);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
@@ -106,19 +103,21 @@ router.post('/:id/comments', async (req, res) => {
     const newComment = { author, content };
     post.comments.push(newComment);
     await post.save();
-    res.status(201).json(post.comments[post.comments.length - 1]); // Return the newly added comment
+
+    res.status(201).json(post.comments[post.comments.length - 1]);
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
 });
 
 // GET comments for a post
-router.get('/:id/comments', async (req, res) => {
+router.get('/:postId/comments', async (req, res) => {
   try {
-    const post = await Post.findById(req.params.id);
+    const post = await Post.findById(req.params.postId);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
+
     res.json(post.comments);
   } catch (err) {
     res.status(500).json({ message: err.message });
