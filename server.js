@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer'); // Still needed for parsing multipart/form-data
 const { Storage } = require('@google-cloud/storage'); // Google Cloud Storage client library
-const fs = require('fs'); // For file system operations (e.g., deleting local uploads if any)
+// const fs = require('fs'); // No longer needed for local uploads directory
 
 dotenv.config(); // Load environment variables from .env file
 
@@ -22,39 +22,38 @@ app.use(express.json());
 // --- Google Cloud Storage Setup ---
 // Initialize Google Cloud Storage
 let storageClient;
-try {
-  // Option 1: Use GOOGLE_APPLICATION_CREDENTIALS environment variable
-  // Ensure your service account key file path is set in this env var
-  storageClient = new Storage();
-  console.log('Google Cloud Storage initialized using GOOGLE_APPLICATION_CREDENTIALS.');
-} catch (error) {
-  // Option 2: Directly provide service account key JSON content
-  // This is useful for environments like Render where file paths might be tricky.
-  // Ensure process.env.GCP_SA_KEY is set with the JSON content of your service account key.
-  if (process.env.GCP_SA_KEY) {
-    try {
-      const serviceAccountKey = JSON.parse(process.env.GCP_SA_KEY);
-      storageClient = new Storage({
-        credentials: {
-          client_email: serviceAccountKey.client_email,
-          private_key: serviceAccountKey.private_key.replace(/\\n/g, '\n'), // Handle escaped newlines
-        },
-        projectId: serviceAccountKey.project_id,
-      });
-      console.log('Google Cloud Storage initialized using GCP_SA_KEY environment variable.');
-    } catch (parseError) {
-      console.error('Error parsing GCP_SA_KEY JSON:', parseError);
-      console.error('Google Cloud Storage will not be available.');
-      storageClient = null; // Mark as not initialized
-    }
-  } else {
-    console.error('GOOGLE_APPLICATION_CREDENTIALS or GCP_SA_KEY environment variable not found.');
+const bucketName = process.env.GCS_BUCKET_NAME; // Your GCS bucket name
+
+// Prioritize GCP_SA_KEY environment variable for service account credentials
+if (process.env.GCP_SA_KEY) {
+  try {
+    const serviceAccountKey = JSON.parse(process.env.GCP_SA_KEY);
+    storageClient = new Storage({
+      credentials: {
+        client_email: serviceAccountKey.client_email,
+        // Replace escaped newlines if the key was pasted as a single line string
+        private_key: serviceAccountKey.private_key.replace(/\\n/g, '\n'),
+      },
+      projectId: serviceAccountKey.project_id,
+    });
+    console.log('Google Cloud Storage initialized using GCP_SA_KEY environment variable.');
+  } catch (parseError) {
+    console.error('Error parsing GCP_SA_KEY JSON:', parseError);
+    console.error('Google Cloud Storage will not be available due to key parsing error.');
+    storageClient = null; // Mark as not initialized
+  }
+} else {
+  // Fallback to GOOGLE_APPLICATION_CREDENTIALS if GCP_SA_KEY is not set
+  // This expects a file path to a service account key JSON file.
+  try {
+    storageClient = new Storage();
+    console.log('Google Cloud Storage initialized using GOOGLE_APPLICATION_CREDENTIALS.');
+  } catch (error) {
+    console.error('GOOGLE_APPLICATION_CREDENTIALS environment variable not found or invalid.');
     console.error('Google Cloud Storage will not be available.');
     storageClient = null; // Mark as not initialized
   }
 }
-
-const bucketName = process.env.GCS_BUCKET_NAME; // Your GCS bucket name
 
 if (!bucketName && storageClient) {
   console.error('GCS_BUCKET_NAME environment variable is not set. GCS uploads will fail.');
@@ -70,13 +69,12 @@ const upload = multer({
   },
 });
 
-// Serve static files from the 'uploads' directory (only if you still have local files or for testing)
-// This path will become less relevant once all images are on GCS.
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
-app.use('/uploads', express.static(uploadsDir));
+// Removed local 'uploads' directory setup and static serving
+// const uploadsDir = path.join(__dirname, 'uploads');
+// if (!fs.existsSync(uploadsDir)) {
+//   fs.mkdirSync(uploadsDir);
+// }
+// app.use('/uploads', express.static(uploadsDir));
 
 
 // MongoDB Connection
@@ -216,6 +214,7 @@ const authenticateToken = (req, res, next) => {
 
 // --- API Routes ---
 
+console.log('Defining /api/register route...');
 // User Registration
 app.post('/api/register', async (req, res) => {
   const { username, password, name, email, number } = req.body;
@@ -254,6 +253,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
+console.log('Defining /api/login route...');
 // User Login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
@@ -289,6 +289,7 @@ app.post('/api/login', async (req, res) => {
 
 // --- Blog Post Routes ---
 
+console.log('Defining GET /api/posts route...');
 // GET all posts (with optional category, search, and pagination)
 app.get('/api/posts', async (req, res) => {
   try {
@@ -331,6 +332,7 @@ app.get('/api/posts', async (req, res) => {
   }
 });
 
+console.log('Defining GET /api/posts/:id route...');
 // GET a single post by ID
 app.get('/api/posts/:id', async (req, res) => {
   try {
@@ -372,8 +374,14 @@ const uploadFileToGCS = async (file) => {
     });
 
     blobStream.on('finish', () => {
-      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-      resolve(publicUrl);
+      // Make the uploaded file publicly accessible
+      blob.makePublic().then(() => {
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+        resolve(publicUrl);
+      }).catch(err => {
+        console.error('Error making GCS file public:', err);
+        reject(new Error('Failed to make GCS file public.'));
+      });
     });
 
     blobStream.end(file.buffer);
@@ -412,6 +420,7 @@ const deleteFileFromGCS = async (fileUrl) => {
 };
 
 
+console.log('Defining POST /api/posts route...');
 // CREATE a new post (PROTECTED)
 // Use upload.single('thumbnail') to handle file upload from frontend
 app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
@@ -454,6 +463,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
   }
 });
 
+console.log('Defining PUT /api/posts/:id route...');
 // UPDATE a post by ID (PROTECTED - only owner can update)
 app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
   const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body;
@@ -515,6 +525,7 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
   }
 });
 
+console.log('Defining DELETE /api/posts/:id route...');
 // DELETE a post by ID (PROTECTED - only owner can delete)
 app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
   try {
@@ -546,6 +557,7 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
 
 // --- Comment Routes ---
 
+console.log('Defining GET /api/posts/:postId/comments route...');
 // GET comments for a specific post
 app.get('/api/posts/:postId/comments', async (req, res) => {
   try {
@@ -557,6 +569,7 @@ app.get('/api/posts/:postId/comments', async (req, res) => {
   }
 });
 
+console.log('Defining POST /api/posts/:postId/comments route...');
 // CREATE a new comment for a specific post (PROTECTED)
 app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   const { content } = req.body;
@@ -590,6 +603,7 @@ app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   }
 });
 
+console.log('Defining DELETE /api/posts/:postId/comments/:commentId route...');
 // DELETE a comment by ID (PROTECTED - only owner can delete)
 app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (req, res) => {
   try {
@@ -617,6 +631,7 @@ app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (r
 
 
 // Serve static files from the React app in production
+console.log('Defining static file serving for production...');
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'client/build')));
 
@@ -626,6 +641,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Start the server
+console.log(`Starting server on port ${PORT}...`);
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
