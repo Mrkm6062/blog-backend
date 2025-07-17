@@ -1,20 +1,55 @@
-// backend/routes/posts.js
-
 const express = require('express');
 const router = express.Router();
-const Post = require('../models/post'); // Adjust path as needed
+const mongoose = require('mongoose');
+const Post = require('../models/post');
+
+// GET comments for a post — PLACE THIS FIRST
+router.get('/:postId/comments', async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.postId);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    res.json(post.comments);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST a new comment to a post — ALSO BEFORE /:id
+router.post('/:postId/comments', async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.postId);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    const { author, content } = req.body;
+    if (!author || !content) {
+      return res.status(400).json({ message: 'Author and content are required for a comment.' });
+    }
+
+    const newComment = { author, content };
+    post.comments.push(newComment);
+    await post.save();
+
+    res.status(201).json(post.comments[post.comments.length - 1]);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
 
 // GET all posts
 router.get('/', async (req, res) => {
   try {
-    const posts = await Post.find().sort({ date: -1 }); // Sort by newest first
+    const posts = await Post.find().sort({ date: -1 });
     res.json(posts);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// GET a single post by ID
+// GET a single post by ID — NOW AFTER /:postId/comments
 router.get('/:id', async (req, res) => {
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
     return res.status(400).json({ message: 'Invalid post ID' });
@@ -28,7 +63,6 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ message: 'Server error', details: err.message });
   }
 });
-
 
 // POST a new post
 router.post('/', async (req, res) => {
@@ -85,43 +119,6 @@ router.delete('/:id', async (req, res) => {
     }
 
     res.json({ message: 'Post deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// POST a new comment to a post
-router.post('/:postId/comments', async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.postId);
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    const { author, content } = req.body;
-    if (!author || !content) {
-      return res.status(400).json({ message: 'Author and content are required for a comment.' });
-    }
-
-    const newComment = { author, content };
-    post.comments.push(newComment);
-    await post.save();
-
-    res.status(201).json(post.comments[post.comments.length - 1]);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
-  }
-});
-
-// GET comments for a post
-router.get('/:postId/comments', async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.postId);
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    res.json(post.comments);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
