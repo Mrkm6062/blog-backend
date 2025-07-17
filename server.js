@@ -484,7 +484,7 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
       }
     } else if (externalThumbnailUrl !== undefined) {
       // If externalThumbnailUrl is explicitly provided (even if empty string), use it
-      // This handles cases where user clears the URL or provides a new external one
+      // This handles cases where user clears the URL or provides a new one
       if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com') && externalThumbnailUrl === '') {
         // If old was GCS and new is empty, delete from GCS
         await deleteFileFromGCS(post.thumbnailUrl);
@@ -531,9 +531,6 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
     if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com')) {
       await deleteFileFromGCS(post.thumbnailUrl);
     }
-    // If it was a local upload (e.g., /uploads/...), you might still have old files there.
-    // The previous local deletion logic is removed as we are moving to GCS.
-    // If you have existing local files, you'd need a separate script to clean them up.
 
     await Post.findByIdAndDelete(req.params.id);
     await Comment.deleteMany({ postId: req.params.id });
