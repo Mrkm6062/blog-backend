@@ -18,8 +18,6 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const postRoutes = require('./routes/posts'); // ✅ Externalized post routes
 
-dotenv.config();
-
 const app = express();
 const PORT = process.env.PORT || 8000;
 
@@ -156,27 +154,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// External Post & Comment Routes
-// 🔍 Inspect and log each route in postRoutes
-if (postRoutes && postRoutes.stack) {
-  console.log('--- Registered Routes in postRoutes ---');
-  postRoutes.stack.forEach((layer, i) => {
-    if (layer.route) {
-      const routePath = layer.route.path;
-      const methods = Object.keys(layer.route.methods).join(', ').toUpperCase();
-      console.log(`  [${i}] ${methods} ${routePath}`);
-    } else if (layer.name === 'router') {
-      console.log(`  [${i}] Nested Router`);
-    } else {
-      console.log(`  [${i}] Middleware`);
-    }
-  });
-  console.log('----------------------------------------');
-} else {
-  console.log('⚠️ postRoutes has no stack. Is it empty or not a router?');
-}
-
-
+// Use external postRoutes
 app.use('/api/posts', postRoutes);
 
 // Support Request Route
@@ -202,17 +180,24 @@ app.post('/api/support', async (req, res) => {
   }
 });
 
+// Function to log all routes safely
 function logRoutes(app) {
+  if (!app._router) {
+    console.log('⚠️ No routes registered yet (app._router is undefined)');
+    return;
+  }
+
   const routes = [];
   app._router.stack.forEach((middleware) => {
     if (middleware.route) {
+      // Direct route on app
       routes.push(`${Object.keys(middleware.route.methods).join(', ').toUpperCase()} ${middleware.route.path}`);
-    } else if (middleware.name === 'router') {
+    } else if (middleware.name === 'router' && middleware.handle.stack) {
+      // Router middleware
       middleware.handle.stack.forEach((handler) => {
-        const path = handler.route?.path;
-        const method = Object.keys(handler.route?.methods || {}).join(', ').toUpperCase();
-        if (path && method) {
-          routes.push(`${method} ${path}`);
+        if (handler.route) {
+          const method = Object.keys(handler.route.methods).join(', ').toUpperCase();
+          routes.push(`${method} ${handler.route.path}`);
         }
       });
     }
@@ -223,8 +208,8 @@ function logRoutes(app) {
   console.log('--------------------------------------\n');
 }
 
-logRoutes(app); // Call this after app.use(...) routes
-
+// Call route logger AFTER all routes are registered
+logRoutes(app);
 
 // Serve React frontend in production
 if (process.env.NODE_ENV === 'production') {
