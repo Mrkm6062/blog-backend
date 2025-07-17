@@ -157,6 +157,17 @@ app.post('/api/login', async (req, res) => {
 });
 
 // External Post & Comment Routes
+console.log("--- Debug: postRoutes mount check ---");
+if (postRoutes?.stack?.length) {
+  postRoutes.stack.forEach((layer, i) => {
+    const routePath = layer.route?.path || '(middleware)';
+    const methods = layer.route?.methods ? Object.keys(layer.route.methods).join(', ') : 'N/A';
+    console.log(`  Route ${i + 1}: ${methods.toUpperCase()} ${routePath}`);
+  });
+} else {
+  console.log("No routes found in postRoutes.");
+}
+
 app.use('/api/posts', postRoutes);
 
 // Support Request Route
