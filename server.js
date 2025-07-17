@@ -24,44 +24,44 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-// Google Cloud Storage Setup
-const { Storage } = require('@google-cloud/storage');
-let storageClient;
-const bucketName = process.env.GCS_BUCKET_NAME;
+// // Google Cloud Storage Setup
+// const { Storage } = require('@google-cloud/storage');
+// let storageClient;
+// const bucketName = process.env.GCS_BUCKET_NAME;
 
-if (process.env.GCP_SA_KEY) {
-  try {
-    const key = JSON.parse(process.env.GCP_SA_KEY);
-    storageClient = new Storage({
-      credentials: {
-        client_email: key.client_email,
-        private_key: key.private_key.replace(/\\n/g, '\n'),
-      },
-      projectId: key.project_id,
-    });
-    console.log('GCS initialized using GCP_SA_KEY.');
-  } catch (e) {
-    console.error('Error parsing GCP_SA_KEY:', e.message);
-    storageClient = null;
-  }
-} else {
-  try {
-    storageClient = new Storage();
-    console.log('GCS initialized using GOOGLE_APPLICATION_CREDENTIALS.');
-  } catch (e) {
-    console.error('GCS not configured:', e.message);
-    storageClient = null;
-  }
-}
+// if (process.env.GCP_SA_KEY) {
+//   try {
+//     const key = JSON.parse(process.env.GCP_SA_KEY);
+//     storageClient = new Storage({
+//       credentials: {
+//         client_email: key.client_email,
+//         private_key: key.private_key.replace(/\\n/g, '\n'),
+//       },
+//       projectId: key.project_id,
+//     });
+//     console.log('GCS initialized using GCP_SA_KEY.');
+//   } catch (e) {
+//     console.error('Error parsing GCP_SA_KEY:', e.message);
+//     storageClient = null;
+//   }
+// } else {
+//   try {
+//     storageClient = new Storage();
+//     console.log('GCS initialized using GOOGLE_APPLICATION_CREDENTIALS.');
+//   } catch (e) {
+//     console.error('GCS not configured:', e.message);
+//     storageClient = null;
+//   }
+// }
 
-if (!bucketName && storageClient) {
-  console.error('GCS_BUCKET_NAME missing.');
-}
+// if (!bucketName && storageClient) {
+//   console.error('GCS_BUCKET_NAME missing.');
+// }
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
+// const upload = multer({
+//   storage: multer.memoryStorage(),
+//   limits: { fileSize: 5 * 1024 * 1024 },
+// });
 
 const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/blogdb';
 mongoose.connect(mongoURI)
