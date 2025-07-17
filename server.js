@@ -5,61 +5,162 @@ const cors = require('cors');
 const path = require('path');
 const nodemailer = require('nodemailer');
 const multer = require('multer');
-const fs = require('fs');
+// const fs = require('fs'); // No longer needed for local file system management with GCS
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const dotenv = require('dotenv'); // Ensure dotenv is imported
+
+dotenv.config(); // Load environment variables from .env file
 
 const app = express();
-// Use process.env.PORT for Render, fallback to 8000 for local
 const PORT = process.env.PORT || 8000;
-
-// Load environment variables (e.g., JWT_SECRET, EMAIL_USER, EMAIL_PASS)
-// In a real app, use a .env file and dotenv package: require('dotenv').config();
-// For Render, these should be set directly in Render's environment variables.
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key'; // CHANGE THIS IN PRODUCTION!
-const EMAIL_USER = process.env.EMAIL_USER || 'your_email@gmail.com'; // Your email address for Nodemailer
-const EMAIL_PASS = process.env.EMAIL_PASS || 'your_email_password_or_app_password'; // Your email password/app password
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'your_support_email@example.com'; // Recipient for support emails
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-// Note: /uploads static serving is kept if you intend to serve uploaded images directly from backend
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Create 'uploads' directory if it doesn't exist
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
+// --- Google Cloud Storage Setup ---
+const { Storage } = require('@google-cloud/storage'); // Google Cloud Storage client library
+let storageClient;
+const bucketName = process.env.GCS_BUCKET_NAME; // Your GCS bucket name
+
+// Prioritize GCP_SA_KEY environment variable for service account credentials
+if (process.env.GCP_SA_KEY) {
+  try {
+    const serviceAccountKey = JSON.parse(process.env.GCP_SA_KEY);
+    storageClient = new Storage({
+      credentials: {
+        client_email: serviceAccountKey.client_email,
+        private_key: serviceAccountKey.private_key.replace(/\\n/g, '\n'), // Handle escaped newlines
+      },
+      projectId: serviceAccountKey.project_id,
+    });
+    console.log('Google Cloud Storage initialized using GCP_SA_KEY environment variable.');
+  } catch (parseError) {
+    console.error('Error parsing GCP_SA_KEY JSON:', parseError);
+    console.error('Google Cloud Storage will not be available due to key parsing error.');
+    storageClient = null; // Mark as not initialized
+  }
+} else {
+  // Fallback to GOOGLE_APPLICATION_CREDENTIALS if GCP_SA_KEY is not set
+  // This expects a file path to a service account key JSON file.
+  try {
+    storageClient = new Storage();
+    console.log('Google Cloud Storage initialized using GOOGLE_APPLICATION_CREDENTIALS.');
+  } catch (error) {
+    console.error('GOOGLE_APPLICATION_CREDENTIALS environment variable not found or invalid.');
+    console.error('Google Cloud Storage will not be available.');
+    storageClient = null; // Mark as not initialized
+  }
 }
 
+if (!bucketName && storageClient) {
+  console.error('GCS_BUCKET_NAME environment variable is not set. GCS uploads will fail.');
+}
+
+// Helper function to upload file to GCS
+const uploadFileToGCS = async (file) => {
+  if (!storageClient || !bucketName) {
+    throw new Error('Google Cloud Storage not configured.');
+  }
+
+  const bucket = storageClient.bucket(bucketName);
+  const uniqueFilename = `${Date.now()}-${file.originalname}`;
+  const blob = bucket.file(uniqueFilename);
+
+  const blobStream = blob.createWriteStream({
+    resumable: false, // For smaller files, resumable can be false
+    metadata: {
+      contentType: file.mimetype,
+    },
+  });
+
+  return new Promise((resolve, reject) => {
+    blobStream.on('error', (err) => {
+      console.error('GCS upload error:', err);
+      reject(new Error('Failed to upload file to Google Cloud Storage.'));
+    });
+
+    blobStream.on('finish', () => {
+      // Make the uploaded file publicly accessible
+      blob.makePublic().then(() => {
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+        resolve(publicUrl);
+      }).catch(err => {
+        console.error('Error making GCS file public:', err);
+        reject(new Error('Failed to make GCS file public.'));
+      });
+    });
+
+    blobStream.end(file.buffer);
+  });
+};
+
+// Helper function to delete file from GCS
+const deleteFileFromGCS = async (fileUrl) => {
+  if (!storageClient || !bucketName) {
+    console.warn('Google Cloud Storage not configured. Skipping GCS file deletion.');
+    return;
+  }
+
+  // Extract filename from the GCS public URL
+  const filename = fileUrl.substring(fileUrl.lastIndexOf('/') + 1);
+  if (!filename) {
+    console.warn('Could not extract filename from URL for GCS deletion:', fileUrl);
+    return;
+  }
+
+  const bucket = storageClient.bucket(bucketName);
+  const blob = bucket.file(filename);
+
+  try {
+    await blob.delete();
+    console.log(`File ${filename} deleted from GCS bucket ${bucketName}.`);
+  } catch (err) {
+    // If the file doesn't exist, GCS will return a 404, which is fine.
+    if (err.code === 404) {
+      console.warn(`File ${filename} not found in GCS bucket ${bucketName}.`);
+    } else {
+      console.error(`Error deleting file ${filename} from GCS:`, err);
+      throw new Error('Failed to delete file from Google Cloud Storage.');
+    }
+  }
+};
+
+// Configure multer for memory storage (files will be held in RAM)
+// This is necessary because GCS client expects a buffer or stream, not a file path.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // Limit file size to 5MB (adjust as needed)
+  },
+});
+
+// Removed local 'uploads' directory setup and static serving
+// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// const uploadsDir = path.join(__dirname, 'uploads');
+// if (!fs.existsSync(uploadsDir)) { fs.mkdirSync(uploadsDir); }
+
+
 // MongoDB Connection
-// Use MONGODB_URI from environment variables for deployment
 const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/blogdb';
 
 mongoose.connect(mongoURI)
   .then(() => console.log('MongoDB connected successfully!'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// Nodemailer Transporter Setup
+// Nodemailer Transporter Setup (kept as it's part of the support route)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
+    user: process.env.EMAIL_USER, // Use environment variables
+    pass: process.env.EMAIL_PASS, // Use environment variables
   },
 });
 
-// Multer Storage Configuration for image uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname);
-  }
-});
-const upload = multer({ storage: storage });
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key'; // CHANGE THIS IN PRODUCTION!
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'your_support_email@example.com'; // Recipient for support emails
+
 
 // JWT Authentication Middleware
 const authMiddleware = (req, res, next) => {
@@ -127,404 +228,365 @@ const supportRequestSchema = new mongoose.Schema({
 const SupportRequest = mongoose.model('SupportRequest', supportRequestSchema);
 
 // User Authentication Routes
-try {
-  app.post('/api/register', async (req, res) => {
-    const { username, password, name, email, number } = req.body;
-    try {
-      let user = await User.findOne({ $or: [{ username }, { email }] });
-      if (user) {
-        return res.status(400).json({ message: 'User with that username or email already exists' });
-      }
-
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-
-      user = new User({ username, password: hashedPassword, name, email, number });
-      await user.save();
-
-      res.status(201).json({ message: 'User registered successfully' });
-    } catch (err) {
-      console.error('Registration error:', err);
-      res.status(500).json({ message: 'Server error', details: err.message });
+app.post('/api/register', async (req, res) => {
+  const { username, password, name, email, number } = req.body;
+  try {
+    let user = await User.findOne({ $or: [{ username }, { email }] });
+    if (user) {
+      return res.status(400).json({ message: 'User with that username or email already exists' });
     }
-  });
-} catch (e) { console.error('Error defining /api/register route:', e); }
 
-try {
-  app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-      const user = await User.findOne({ username });
-      if (!user) {
-        return res.status(400).json({ message: 'Invalid credentials' });
-      }
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ message: 'Invalid credentials' });
-      }
+    user = new User({ username, password: hashedPassword, name, email, number });
+    await user.save();
 
-      const payload = {
-        user: {
-          id: user.id,
-          username: user.username,
-        },
-      };
+    res.status(201).json({ message: 'User registered successfully' });
+  } catch (err) {
+    console.error('Registration error:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
 
-      jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
-        if (err) throw err;
-        res.json({ token, username: user.username, userId: user.id });
-      });
-    } catch (err) {
-      console.error('Login error:', err);
-      res.status(500).json({ message: 'Server error', details: err.message });
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid credentials' });
     }
-  });
-} catch (e) { console.error('Error defining /api/login route:', e); }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    const payload = {
+      user: {
+        id: user.id,
+        username: user.username,
+      },
+    };
+
+    jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
+      if (err) throw err;
+      res.json({ token, username: user.username, userId: user.id });
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
 
 
 // API Routes for Blog Posts
 
-try {
-  // GET all posts (with optional category, search, and pagination)
-  app.get('/api/posts', async (req, res) => {
-    try {
-      const { category, search, page = 1, limit = 4, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-      let filter = {};
+// GET all posts (with optional category, search, and pagination)
+app.get('/api/posts', async (req, res) => {
+  try {
+    const { category, search, page = 1, limit = 4, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    let filter = {};
 
-      if (category && category !== 'All') {
-        filter.category = category;
-      }
-
-      if (search) {
-        const searchRegex = new RegExp(search, 'i');
-        filter.$or = [
-          { title: { $regex: searchRegex } },
-          { author: { $regex: searchRegex } },
-          { content: { $regex: searchRegex } }
-        ];
-      }
-
-      const sortOptions = {};
-      sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-      const skip = (parseInt(page) - 1) * parseInt(limit);
-      const postsQuery = Post.find(filter)
-                             .sort(sortOptions)
-                             .skip(skip)
-                             .limit(parseInt(limit));
-
-      const [posts, totalPosts] = await Promise.all([
-        postsQuery.exec(),
-        Post.countDocuments(filter)
-      ]);
-
-      res.json({ posts, totalPosts });
-    } catch (err) {
-      console.error('Error fetching posts:', err);
-      res.status(500).json({ message: 'Server error' });
+    if (category && category !== 'All') {
+      filter.category = category;
     }
-  });
-} catch (e) { console.error('Error defining /api/posts GET route:', e); }
 
-try {
-  // GET a single post by ID
-  app.get('/api/posts/:id', async (req, res) => { // Correct: ':id' is a named parameter
-    try {
-      const post = await Post.findById(req.params.id);
-      if (!post) {
-        return res.status(404).json({ message: 'Post not found' });
-      }
-      res.json(post);
-    } catch (err) {
-      console.error('Error fetching single post:', err);
-      if (err.kind === 'ObjectId') {
-          return res.status(400).json({ message: 'Invalid Post ID format' });
-      }
-      res.status(500).json({ message: 'Server error' });
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      filter.$or = [
+        { title: { $regex: searchRegex } },
+        { author: { $regex: searchRegex } },
+        { content: { $regex: searchRegex } }
+      ];
     }
-  });
-} catch (e) { console.error('Error defining /api/posts/:id GET route:', e); }
 
-try {
-  // CREATE a new post with optional image upload (protected by authMiddleware)
-  app.post('/api/posts', authMiddleware, upload.single('thumbnail'), async (req, res) => {
-    const { title, content, category } = req.body;
-    const thumbnailUrlFromForm = req.body.thumbnailUrl;
-    const uploadedFile = req.file;
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
-    // Get author and userId from the authenticated user
-    const author = req.user.username;
-    const userId = req.user.id;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const postsQuery = Post.find(filter)
+                           .sort(sortOptions)
+                           .skip(skip)
+                           .limit(parseInt(limit));
 
-    console.log('POST /api/posts: req.user.id (from JWT):', userId);
-    console.log('POST /api/posts: req.user.username (from JWT):', author);
+    const [posts, totalPosts] = await Promise.all([
+      postsQuery.exec(),
+      Post.countDocuments(filter)
+    ]);
 
+    res.json({ posts, totalPosts });
+  } catch (err) {
+    console.error('Error fetching posts:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
-    let finalThumbnailUrl = thumbnailUrlFromForm;
+// GET a single post by ID
+app.get('/api/posts/:id', async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    res.json(post);
+  } catch (err) {
+    console.error('Error fetching single post:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Post ID format' });
+    }
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// CREATE a new post with optional image upload (protected by authMiddleware)
+app.post('/api/posts', authMiddleware, upload.single('thumbnail'), async (req, res) => {
+  const { title, content, category } = req.body;
+  const thumbnailUrlFromForm = req.body.thumbnailUrl; // This is for external URLs
+  const uploadedFile = req.file; // This is for files uploaded via input type="file"
+
+  // Get author and userId from the authenticated user
+  const author = req.user.username;
+  const userId = req.user.id;
+
+  let finalThumbnailUrl = thumbnailUrlFromForm; // Default to external URL if provided
+
+  if (uploadedFile) {
+    // If a file was uploaded, upload it to GCS
+    try {
+      finalThumbnailUrl = await uploadFileToGCS(uploadedFile);
+    } catch (gcsErr) {
+      console.error('Failed to upload thumbnail to GCS:', gcsErr);
+      return res.status(500).json({ message: 'Failed to upload thumbnail.', details: gcsErr.message });
+    }
+  }
+
+  if (!title || !author || !content) {
+    return res.status(400).json({ message: 'Please enter all fields: title, author, and content.' });
+  }
+
+  try {
+    const newPost = new Post({
+      title,
+      author,
+      userId, // Save the userId of the creator
+      date: new Date().toISOString().split('T')[0],
+      content,
+      thumbnailUrl: finalThumbnailUrl,
+      category: category || 'Other',
+    });
+
+    const savedPost = await newPost.save();
+    console.log('POST /api/posts: Saved Post:', savedPost);
+    res.status(201).json(savedPost);
+  } catch (err) {
+    console.error('Error creating post:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+// UPDATE a post by ID with optional image upload (protected by authMiddleware)
+app.put('/api/posts/:id', authMiddleware, upload.single('thumbnail'), async (req, res) => {
+  const { title, content, category } = req.body;
+  const thumbnailUrlFromForm = req.body.thumbnailUrl; // This is for external URLs or clearing
+  const uploadedFile = req.file; // This is for files uploaded via input type="file"
+
+  try {
+    let post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    // Authorization check: Only the post owner can update
+    if (post.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Forbidden: You can only update your own posts.' });
+    }
+
+    let finalThumbnailUrl = post.thumbnailUrl; // Start with the existing URL
+
     if (uploadedFile) {
-      finalThumbnailUrl = `${req.protocol}://${req.get('host')}/uploads/${uploadedFile.filename}`;
+      // If a new file is uploaded, delete the old one from GCS if it exists and was a GCS URL
+      if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com')) {
+        await deleteFileFromGCS(post.thumbnailUrl);
+      }
+      finalThumbnailUrl = await uploadFileToGCS(uploadedFile); // Upload new file
+    } else if (thumbnailUrlFromForm !== undefined) { // Check if the field was sent, even if empty
+      // If the old thumbnail was a GCS URL and the new one is empty (cleared by user)
+      if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com') && thumbnailUrlFromForm === '') {
+        await deleteFileFromGCS(post.thumbnailUrl);
+      }
+      finalThumbnailUrl = thumbnailUrlFromForm; // Use the provided external URL (could be empty)
+    }
+    // If neither uploadedFile nor thumbnailUrlFromForm is provided, finalThumbnailUrl remains the old one.
+
+
+    const updatedPost = await Post.findByIdAndUpdate(
+      req.params.id,
+      { title, content, thumbnailUrl: finalThumbnailUrl, category }, // Author and userId are not updated here
+      { new: true, runValidators: true }
+    );
+
+    res.json(updatedPost);
+  } catch (err) {
+    console.error('Error updating post:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Post ID format' });
+    }
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+// DELETE a post by ID (protected by authMiddleware)
+app.delete('/api/posts/:id', authMiddleware, async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
     }
 
-    if (!title || !author || !content) {
-      if (uploadedFile) {
-        fs.unlink(uploadedFile.path, (err) => {
-          if (err) console.error('Error deleting uploaded file:', err);
-        });
-      }
-      return res.status(400).json({ message: 'Please enter all fields: title, author, and content.' });
+    // Authorization check: Only the post owner can delete
+    if (post.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Forbidden: You can only delete your own posts.' });
     }
 
-    try {
-      const newPost = new Post({
-        title,
-        author,
-        userId, // Save the userId of the creator
-        date: new Date().toISOString().split('T')[0],
-        content,
-        thumbnailUrl: finalThumbnailUrl,
-        category: category || 'Other',
-      });
-
-      const savedPost = await newPost.save();
-      console.log('POST /api/posts: Saved Post:', savedPost);
-      res.status(201).json(savedPost);
-    } catch (err) {
-      console.error('Error creating post:', err);
-      // If a file was uploaded but saving to DB fails, delete the file
-      if (uploadedFile) {
-        fs.unlink(uploadedFile.path, (err) => {
-          if (err) console.error('Error deleting uploaded file:', err);
-        });
-      }
-      res.status(500).json({ message: 'Server error', details: err.message });
+    // Delete associated thumbnail file from GCS if it's a GCS URL
+    if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com')) {
+      await deleteFileFromGCS(post.thumbnailUrl);
     }
-  });
-} catch (e) { console.error('Error defining /api/posts POST route:', e); }
 
-try {
-  // UPDATE a post by ID with optional image upload (protected by authMiddleware)
-  app.put('/api/posts/:id', authMiddleware, upload.single('thumbnail'), async (req, res) => { // Correct: ':id' is a named parameter
-    const { title, content, category } = req.body;
-    const thumbnailUrlFromForm = req.body.thumbnailUrl;
-    const uploadedFile = req.file;
-
-    try {
-      let post = await Post.findById(req.params.id);
-      if (!post) {
-        if (uploadedFile) {
-          fs.unlink(uploadedFile.path, (err) => {
-            if (err) console.error('Error deleting uploaded file:', err);
-          });
-        }
-        return res.status(404).json({ message: 'Post not found' });
-      }
-
-      // Authorization check: Only the post owner can update
-      if (post.userId.toString() !== req.user.id) {
-        if (uploadedFile) { // Delete uploaded file if unauthorized
-          fs.unlink(uploadedFile.path, (err) => {
-            if (err) console.error('Error deleting unauthorized uploaded file:', err);
-          });
-        }
-        return res.status(403).json({ message: 'Forbidden: You can only update your own posts.' });
-      }
-
-      let finalThumbnailUrl = post.thumbnailUrl;
-      if (uploadedFile) {
-        if (post.thumbnailUrl && post.thumbnailUrl.includes('/uploads/')) {
-          const oldImagePath = path.join(__dirname, post.thumbnailUrl.split('/uploads/')[1]);
-          fs.unlink(oldImagePath, (err) => {
-            if (err) console.error('Error deleting old uploaded file:', err);
-          });
-        }
-        finalThumbnailUrl = `${req.protocol}://${req.get('host')}/uploads/${uploadedFile.filename}`;
-      } else if (thumbnailUrlFromForm !== undefined) {
-        if (post.thumbnailUrl && post.thumbnailUrl.includes('/uploads/')) {
-          const oldImagePath = path.join(__dirname, post.thumbnailUrl.split('/uploads/')[1]);
-          fs.unlink(oldImagePath, (err) => {
-            if (err) console.error('Error deleting old uploaded file:', err);
-          });
-        }
-        finalThumbnailUrl = thumbnailUrlFromForm;
-      }
-
-
-      const updatedPost = await Post.findByIdAndUpdate(
-        req.params.id,
-        { title, content, thumbnailUrl: finalThumbnailUrl, category }, // Author and userId are not updated here
-        { new: true, runValidators: true }
-      );
-
-      res.json(updatedPost);
-    } catch (err) {
-      console.error('Error updating post:', err);
-      if (uploadedFile) {
-        fs.unlink(uploadedFile.path, (err) => {
-          if (err) console.error('Error deleting uploaded file:', err);
-        });
-      }
-      if (err.kind === 'ObjectId') {
-          return res.status(400).json({ message: 'Invalid Post ID format' });
-      }
-      res.status(500).json({ message: 'Server error', details: err.message });
+    await Post.findByIdAndDelete(req.params.id);
+    // Also delete associated comments when a post is deleted
+    await Comment.deleteMany({ postId: req.params.id });
+    res.json({ message: 'Post and associated comments deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting post:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Post ID format' });
     }
-  });
-} catch (e) { console.error('Error defining /api/posts/:id PUT route:', e); }
-
-try {
-  // DELETE a post by ID (protected by authMiddleware)
-  app.delete('/api/posts/:id', authMiddleware, async (req, res) => { // Correct: ':id' is a named parameter
-    try {
-      const post = await Post.findById(req.params.id);
-      if (!post) {
-        return res.status(404).json({ message: 'Post not found' });
-      }
-
-      // Authorization check: Only the post owner can delete
-      if (post.userId.toString() !== req.user.id) {
-        return res.status(403).json({ message: 'Forbidden: You can only delete your own posts.' });
-      }
-
-      if (post.thumbnailUrl && post.thumbnailUrl.includes('/uploads/')) {
-        const imagePath = path.join(__dirname, post.thumbnailUrl.split('/uploads/')[1]);
-        fs.unlink(imagePath, (err) => {
-          if (err) console.error('Error deleting associated image file:', err);
-        });
-      }
-
-      await Post.findByIdAndDelete(req.params.id);
-      // Also delete associated comments when a post is deleted
-      await Comment.deleteMany({ postId: req.params.id });
-      res.json({ message: 'Post and associated comments deleted successfully' });
-    } catch (err) {
-      console.error('Error deleting post:', err);
-      if (err.kind === 'ObjectId') {
-          return res.status(400).json({ message: 'Invalid Post ID format' });
-      }
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-} catch (e) { console.error('Error defining /api/posts/:id DELETE route:', e); }
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // API Routes for Comments
 
-try {
-  // GET comments for a specific post
-  app.get('/api/posts/:postId/comments', async (req, res) => { // Correct: ':postId' is a named parameter
-    try {
-      const comments = await Comment.find({ postId: req.params.postId }).sort({ createdAt: 1 });
-      res.json(comments);
-    } catch (err) {
-      console.error('Error fetching comments:', err);
-      res.status(500).json({ message: 'Server error' });
+// GET comments for a specific post
+app.get('/api/posts/:postId/comments', async (req, res) => {
+  try {
+    const comments = await Comment.find({ postId: req.params.postId }).sort({ createdAt: 1 });
+    res.json(comments);
+  } catch (err) {
+    console.error('Error fetching comments:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// CREATE a new comment for a specific post (protected by authMiddleware)
+app.post('/api/posts/:postId/comments', authMiddleware, async (req, res) => {
+  const { content } = req.body;
+  const { postId } = req.params;
+
+  // Get author and userId from the authenticated user
+  const author = req.user.username;
+  const userId = req.user.id;
+
+  if (!content) {
+    return res.status(400).json({ message: 'Comment content cannot be empty.' });
+  }
+
+  try {
+    const newComment = new Comment({
+      postId,
+      author,
+      userId, // Save the userId of the comment author
+      content,
+      date: new Date().toISOString().split('T')[0],
+    });
+
+    const savedComment = await newComment.save();
+    res.status(201).json(savedComment);
+  } catch (err) {
+    console.error('Error creating comment:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+// DELETE a comment by ID (protected by authMiddleware)
+app.delete('/api/posts/:postId/comments/:commentId', authMiddleware, async (req, res) => {
+  try {
+    const comment = await Comment.findById(req.params.commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Comment not found' });
     }
-  });
-} catch (e) { console.error('Error defining /api/posts/:postId/comments GET route:', e); }
 
-try {
-  // CREATE a new comment for a specific post (protected by authMiddleware)
-  app.post('/api/posts/:postId/comments', authMiddleware, async (req, res) => { // Correct: ':postId' is a named parameter
-    const { content } = req.body;
-    const { postId } = req.params;
-
-    // Get author and userId from the authenticated user
-    const author = req.user.username;
-    const userId = req.user.id;
-
-    if (!content) {
-      return res.status(400).json({ message: 'Comment content cannot be empty.' });
+    // Authorization check: Only the comment owner can delete
+    if (comment.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Forbidden: You can only delete your own comments.' });
     }
 
-    try {
-      const newComment = new Comment({
-        postId,
-        author,
-        userId, // Save the userId of the comment author
-        content,
-        date: new Date().toISOString().split('T')[0],
-      });
-
-      const savedComment = await newComment.save();
-      res.status(201).json(savedComment);
-    } catch (err) {
-      console.error('Error creating comment:', err);
-      res.status(500).json({ message: 'Server error', details: err.message });
+    await Comment.findByIdAndDelete(req.params.commentId);
+    res.json({ message: 'Comment deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting comment:', err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: 'Invalid Comment ID format' });
     }
-  });
-} catch (e) { console.error('Error defining /api/posts/:postId/comments POST route:', e); }
-
-try {
-  // DELETE a comment by ID (protected by authMiddleware)
-  app.delete('/api/posts/:postId/comments/:commentId', authMiddleware, async (req, res) => { // Correct: Both are named parameters
-    try {
-      const comment = await Comment.findById(req.params.commentId);
-      if (!comment) {
-        return res.status(404).json({ message: 'Comment not found' });
-      }
-
-      // Authorization check: Only the comment owner can delete
-      if (comment.userId.toString() !== req.user.id) {
-        return res.status(403).json({ message: 'Forbidden: You can only delete your own comments.' });
-      }
-
-      await Comment.findByIdAndDelete(req.params.commentId);
-      res.json({ message: 'Comment deleted successfully' });
-    } catch (err) {
-      console.error('Error deleting comment:', err);
-      if (err.kind === 'ObjectId') {
-          return res.status(400).json({ message: 'Invalid Comment ID format' });
-      }
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-} catch (e) { console.error('Error defining /api/posts/:postId/comments/:commentId DELETE route:', e); }
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // API Route for Support Requests
-try {
-  app.post('/api/support', async (req, res) => {
-    const { name, email, message } = req.body;
+app.post('/api/support', async (req, res) => {
+  const { name, email, message } = req.body;
 
-    if (!name || !email || !message) {
-      return res.status(400).json({ message: 'Please fill in all fields (name, email, message).' });
-    }
+  if (!name || !email || !message) {
+    return res.status(400).json({ message: 'Please fill in all fields (name, email, message).' });
+  }
 
-    try {
-      const newSupportRequest = new SupportRequest({ name, email, message });
-      await newSupportRequest.save();
+  try {
+    const newSupportRequest = new SupportRequest({ name, email, message });
+    await newSupportRequest.save();
 
-      const mailOptions = {
-        from: EMAIL_USER,
-        to: SUPPORT_EMAIL,
-        subject: `New Support Request from ${name} (${email})`,
-        html: `
-          <p>You have received a new support request:</p>
-          <ul>
-            <li><strong>Name:</strong> ${name}</li>
-            <li><strong>Email:</strong> ${email}</li>
-            <li><strong>Message:</strong></li>
-          </ul>
-          <p>${message}</p>
-          <p>Sent at: ${new Date().toLocaleString()}</p>
-        `,
-      };
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: process.env.SUPPORT_EMAIL,
+      subject: `New Support Request from ${name} (${email})`,
+      html: `
+        <p>You have received a new support request:</p>
+        <ul>
+          <li><strong>Name:</strong> ${name}</li>
+          <li><strong>Email:</strong> ${email}</li>
+          <li><strong>Message:</strong></li>
+        </ul>
+        <p>${message}</p>
+        <p>Sent at: ${new Date().toLocaleString()}</p>
+      `,
+    };
 
-      transporter.sendMail(mailOptions, (error, info) => {
-        if (error) {
-          console.error('Error sending email:', error);
-          return res.status(200).json({ message: 'Support request received, but email notification failed.', details: error.message });
-        }
-        console.log('Email sent: ' + info.response);
-        res.status(201).json({ message: 'Support request sent successfully!' });
-      });
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('Error sending email:', error);
+        return res.status(200).json({ message: 'Support request received, but email notification failed.', details: error.message });
+      }
+      console.log('Email sent: ' + info.response);
+      res.status(201).json({ message: 'Support request sent successfully!' });
+    });
 
-    } catch (err) {
-      console.error('Error handling support request:', err);
-      res.status(500).json({ message: 'Server error', details: err.message });
-    }
+  } catch (err) {
+    console.error('Error handling support request:', err);
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
+
+// Serve static files from the React app in production
+// This part is for deployment. In development, the React dev server handles this.
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'client/build')));
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
   });
-} catch (e) { console.error('Error defining /api/support POST route:', e); }
-
+}
 
 // Start the server
 app.listen(PORT, () => {
