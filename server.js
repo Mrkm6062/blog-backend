@@ -202,6 +202,30 @@ app.post('/api/support', async (req, res) => {
   }
 });
 
+function logRoutes(app) {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push(`${Object.keys(middleware.route.methods).join(', ').toUpperCase()} ${middleware.route.path}`);
+    } else if (middleware.name === 'router') {
+      middleware.handle.stack.forEach((handler) => {
+        const path = handler.route?.path;
+        const method = Object.keys(handler.route?.methods || {}).join(', ').toUpperCase();
+        if (path && method) {
+          routes.push(`${method} ${path}`);
+        }
+      });
+    }
+  });
+
+  console.log('\n🔍 [DEBUG] All Registered Routes:');
+  routes.forEach((r, i) => console.log(`  [${i}] ${r}`));
+  console.log('--------------------------------------\n');
+}
+
+logRoutes(app); // Call this after app.use(...) routes
+
+
 // Serve React frontend in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'client/build')));
