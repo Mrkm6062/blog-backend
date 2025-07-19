@@ -24,6 +24,7 @@ app.use(express.json());
 let storageClient;
 const bucketName = process.env.GCS_BUCKET_NAME; // Your GCS bucket name
 
+console.log('Attempting to initialize Google Cloud Storage...');
 // Prioritize GCP_SA_KEY environment variable for service account credentials
 if (process.env.GCP_SA_KEY) {
   try {
@@ -36,27 +37,34 @@ if (process.env.GCP_SA_KEY) {
       },
       projectId: serviceAccountKey.project_id,
     });
-    console.log('Google Cloud Storage initialized using GCP_SA_KEY environment variable.');
+    console.log('Google Cloud Storage initialized successfully using GCP_SA_KEY environment variable.');
   } catch (parseError) {
     console.error('Error parsing GCP_SA_KEY JSON:', parseError);
-    console.error('Google Cloud Storage will not be available due to key parsing error.');
+    console.error('Google Cloud Storage will not be available due to key parsing error. Check GCP_SA_KEY format.');
     storageClient = null; // Mark as not initialized
   }
 } else {
   // Fallback to GOOGLE_APPLICATION_CREDENTIALS if GCP_SA_KEY is not set
   // This expects a file path to a service account key JSON file.
+  // Note: Render might not easily support GOOGLE_APPLICATION_CREDENTIALS pointing to a file path directly.
   try {
     storageClient = new Storage();
-    console.log('Google Cloud Storage initialized using GOOGLE_APPLICATION_CREDENTIALS.');
+    console.log('Google Cloud Storage initialized using GOOGLE_APPLICATION_CREDENTIALS (or default ADC).');
   } catch (error) {
-    console.error('GOOGLE_APPLICATION_CREDENTIALS environment variable not found or invalid.');
-    console.error('Google Cloud Storage will not be available.');
+    console.error('GOOGLE_APPLICATION_CREDENTIALS environment variable not found or invalid, or other GCS initialization error:', error);
+    console.error('Google Cloud Storage will not be available. Ensure GOOGLE_APPLICATION_CREDENTIALS points to a valid file or GCP_SA_KEY is set.');
     storageClient = null; // Mark as not initialized
   }
 }
 
-if (!bucketName && storageClient) {
+if (!bucketName) {
   console.error('GCS_BUCKET_NAME environment variable is not set. GCS uploads will fail.');
+} else {
+  console.log(`GCS_BUCKET_NAME is set to: ${bucketName}`);
+}
+
+if (!storageClient) {
+  console.error('Google Cloud Storage client is NOT initialized. Image uploads will fail.');
 }
 
 
@@ -353,7 +361,8 @@ app.get('/api/posts/:id', async (req, res) => {
 // Helper function to upload file to GCS
 const uploadFileToGCS = async (file) => {
   if (!storageClient || !bucketName) {
-    throw new Error('Google Cloud Storage not configured.');
+    console.error('GCS upload attempt failed: storageClient or bucketName not configured.');
+    throw new Error('Google Cloud Storage not configured. Check server logs for details.');
   }
 
   const bucket = storageClient.bucket(bucketName);
@@ -369,7 +378,7 @@ const uploadFileToGCS = async (file) => {
 
   return new Promise((resolve, reject) => {
     blobStream.on('error', (err) => {
-      console.error('GCS upload error:', err);
+      console.error('GCS upload stream error:', err);
       reject(new Error('Failed to upload file to Google Cloud Storage.'));
     });
 
@@ -377,10 +386,11 @@ const uploadFileToGCS = async (file) => {
       // Make the uploaded file publicly accessible
       blob.makePublic().then(() => {
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+        console.log(`File uploaded to GCS: ${publicUrl}`);
         resolve(publicUrl);
       }).catch(err => {
         console.error('Error making GCS file public:', err);
-        reject(new Error('Failed to make GCS file public.'));
+        reject(new Error('Failed to make GCS file public. Check bucket permissions.'));
       });
     });
 
@@ -439,7 +449,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
     try {
       finalThumbnailUrl = await uploadFileToGCS(req.file);
     } catch (gcsErr) {
-      console.error('Failed to upload thumbnail to GCS:', gcsErr);
+      console.error('Failed to upload thumbnail to GCS during post creation:', gcsErr);
       return res.status(500).json({ message: 'Failed to upload thumbnail.', details: gcsErr.message });
     }
   }
@@ -489,7 +499,7 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
         }
         finalThumbnailUrl = await uploadFileToGCS(req.file);
       } catch (gcsErr) {
-        console.error('Failed to upload new thumbnail to GCS:', gcsErr);
+        console.error('Failed to upload new thumbnail to GCS during post update:', gcsErr);
         return res.status(500).json({ message: 'Failed to upload new thumbnail.', details: gcsErr.message });
       }
     } else if (externalThumbnailUrl !== undefined) {
