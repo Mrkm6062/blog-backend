@@ -641,14 +641,14 @@ app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (r
 
 
 // Serve static files from the React app in production
-console.log('Defining static file serving for production...');
- if (process.env.NODE_ENV === 'production') {
-app.use(express.static(path.join(__dirname, 'client/build')));
+// console.log('Defining static file serving for production...');
+// if (process.env.NODE_ENV === 'production') {
+//   app.use(express.static(path.join(__dirname, 'client/build')));
 
-   app.get('*', (req, res) => {
-     res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
-   });
- }
+//   app.get('*', (req, res) => {
+//     res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
+//   });
+// }
 
 // Start the server
 console.log(`Starting server on port ${PORT}...`);
