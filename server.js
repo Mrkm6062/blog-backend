@@ -340,6 +340,20 @@ app.get('/api/posts', async (req, res) => {
   }
 });
 
+// NEW ROUTE: Get posts by authenticated user
+console.log('Defining GET /api/posts/my-posts route...');
+app.get('/api/posts/my-posts', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id; // Get user ID from the authenticated token
+    const userPosts = await Post.find({ userId: userId }).sort({ createdAt: -1 });
+    res.json(userPosts);
+  } catch (err) {
+    console.error('Error fetching user-specific posts:', err);
+    res.status(500).json({ message: 'Server error fetching your posts.' });
+  }
+});
+
+
 console.log('Defining GET /api/posts/:id route...');
 // GET a single post by ID
 app.get('/api/posts/:id', async (req, res) => {
