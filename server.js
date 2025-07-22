@@ -6,33 +6,28 @@ const path = require('path');
 const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const multer = require('multer'); // Still needed for parsing multipart/form-data
-const { Storage } = require('@google-cloud/storage'); // Google Cloud Storage client library
-// const fs = require('fs'); // No longer needed for local uploads directory
+const multer = require('multer');
+const { Storage } = require('@google-cloud/storage');
 
-dotenv.config(); // Load environment variables from .env file
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
 // --- Google Cloud Storage Setup ---
-// Initialize Google Cloud Storage
 let storageClient;
-const bucketName = process.env.GCS_BUCKET_NAME; // Your GCS bucket name
+const bucketName = process.env.GCS_BUCKET_NAME;
 
 console.log('Attempting to initialize Google Cloud Storage...');
-// Prioritize GCP_SA_KEY environment variable for service account credentials
 if (process.env.GCP_SA_KEY) {
   try {
     const serviceAccountKey = JSON.parse(process.env.GCP_SA_KEY);
     storageClient = new Storage({
       credentials: {
         client_email: serviceAccountKey.client_email,
-        // Replace escaped newlines if the key was pasted as a single line string
         private_key: serviceAccountKey.private_key.replace(/\\n/g, '\n'),
       },
       projectId: serviceAccountKey.project_id,
@@ -41,19 +36,16 @@ if (process.env.GCP_SA_KEY) {
   } catch (parseError) {
     console.error('Error parsing GCP_SA_KEY JSON:', parseError);
     console.error('Google Cloud Storage will not be available due to key parsing error. Check GCP_SA_KEY format.');
-    storageClient = null; // Mark as not initialized
+    storageClient = null;
   }
 } else {
-  // Fallback to GOOGLE_APPLICATION_CREDENTIALS if GCP_SA_KEY is not set
-  // This expects a file path to a service account key JSON file.
-  // Note: Render might not easily support GOOGLE_APPLICATION_CREDENTIALS pointing to a file path directly.
   try {
     storageClient = new Storage();
     console.log('Google Cloud Storage initialized using GOOGLE_APPLICATION_CREDENTIALS (or default ADC).');
   } catch (error) {
     console.error('GOOGLE_APPLICATION_CREDENTIALS environment variable not found or invalid, or other GCS initialization error:', error);
     console.error('Google Cloud Storage will not be available. Ensure GOOGLE_APPLICATION_CREDENTIALS points to a valid file or GCP_SA_KEY is set.');
-    storageClient = null; // Mark as not initialized
+    storageClient = null;
   }
 }
 
@@ -67,23 +59,12 @@ if (!storageClient) {
   console.error('Google Cloud Storage client is NOT initialized. Image uploads will fail.');
 }
 
-
-// Configure multer for memory storage (files will be held in RAM)
-// This is necessary because GCS client expects a buffer or stream, not a file path.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024, // Limit file size to 5MB (adjust as needed)
+    fileSize: 5 * 1024 * 1024, // Limit file size to 5MB
   },
 });
-
-// Removed local 'uploads' directory setup and static serving
-// const uploadsDir = path.join(__dirname, 'uploads');
-// if (!fs.existsSync(uploadsDir)) {
-//   fs.mkdirSync(uploadsDir);
-// }
-// app.use('/uploads', express.static(uploadsDir));
-
 
 // MongoDB Connection
 const mongoURI = process.env.MONGO_URI || 'mongodb+srv://akm222143:Z466GPPhEp5GlnuJ@marto.klqfj94.mongodb.net/samriddhiblogdb?retryWrites=true&w=majority';
@@ -93,20 +74,17 @@ mongoose.connect(mongoURI)
   .catch(err => console.error('MongoDB connection error:', err));
 
 // --- Mongoose Schemas and Models ---
-
-// Utility function to create a URL-friendly slug
 const slugify = (text) => {
   return text
     .toString()
-    .normalize('NFD') // Normalize diacritics
-    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, '-') // Replace spaces with -
-    .replace(/[^\w-]+/g, '') // Remove all non-word chars
-    .replace(/--+/g, '-'); // Replace multiple - with single -
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-');
 };
-
 
 // Define User Schema and Model
 const userSchema = new mongoose.Schema({
@@ -150,10 +128,10 @@ const postSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
-  slug: { // New slug field
+  slug: {
     type: String,
     unique: true,
-    index: true, // Index for faster lookup
+    index: true,
   },
   author: {
     type: String,
@@ -173,15 +151,34 @@ const postSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  thumbnailUrl: { // This will now store the GCS public URL
+  thumbnailUrl: {
     type: String,
     default: '',
+  },
+  thumbnailAltText: { // New field for thumbnail alt text
+    type: String,
+    default: '',
+    trim: true,
+  },
+  metaDescription: { // New field for meta description
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 160, // Common max length for meta descriptions
   },
   category: {
     type: String,
     enum: ['Fitness', 'Health', 'Travel', 'Fashion', 'Other'],
     default: 'Other',
     required: true,
+  },
+  likes: [{ // Array to store user IDs who liked the post (authenticated users)
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  anonymousLikeCount: { // New: Counter for likes from unauthenticated users
+    type: Number,
+    default: 0,
   },
 }, {
   timestamps: true,
@@ -243,13 +240,19 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (token == null) {
-    return res.status(401).json({ message: 'Authentication token required' });
+    // If no token, proceed as unauthenticated (for routes that allow it)
+    req.user = null;
+    return next();
   }
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       console.error('JWT verification error:', err);
-      return res.status(403).json({ message: 'Invalid or expired token' });
+      // If token is invalid/expired, treat as unauthenticated for some routes
+      req.user = null;
+      // For protected routes, this would be a 403
+      // For routes that allow optional auth, we just set req.user to null
+      return next();
     }
     req.user = user;
     next();
@@ -379,9 +382,13 @@ app.get('/api/posts', async (req, res) => {
 console.log('Defining GET /api/posts/my-posts route...');
 app.get('/api/posts/my-posts', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id; // Get user ID from the authenticated token
+    // This route should strictly require authentication
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'Authentication required to view your posts.' });
+    }
+    const userId = req.user.id;
     const userPosts = await Post.find({ userId: userId }).sort({ createdAt: -1 });
-    res.json({ posts: userPosts, totalPosts: userPosts.length }); // Return totalPosts for pagination
+    res.json({ posts: userPosts, totalPosts: userPosts.length });
   } catch (err) {
     console.error('Error fetching user-specific posts:', err);
     res.status(500).json({ message: 'Server error fetching your posts.' });
@@ -389,7 +396,7 @@ app.get('/api/posts/my-posts', authenticateToken, async (req, res) => {
 });
 
 
-// NEW ROUTE: GET a single post by ID or SLUG
+// GET a single post by ID or SLUG
 console.log('Defining GET /api/posts/detail/:identifier route...');
 app.get('/api/posts/detail/:identifier', async (req, res) => {
   try {
@@ -403,16 +410,7 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
 
     // If not found by ID or not a valid ID, try to find by slug
     if (!post) {
-      // Extract slug from the identifier (e.g., "my-post-title-654321abcdef...")
-      // The slug is everything before the last 24 characters (the ID) if it exists.
-      const slugMatch = identifier.match(/^(.*)-([a-f0-9]{24})$/);
-      let slugToSearch = identifier; // Default to full identifier if no slug-ID format
-
-      if (slugMatch && slugMatch[1]) {
-        slugToSearch = slugMatch[1]; // Use the slug part
-      }
-
-      post = await Post.findOne({ slug: slugToSearch });
+      post = await Post.findOne({ slug: identifier });
     }
 
     if (!post) {
@@ -438,7 +436,7 @@ const uploadFileToGCS = async (file) => {
   const blob = bucket.file(uniqueFilename);
 
   const blobStream = blob.createWriteStream({
-    resumable: false, // For smaller files, resumable can be false
+    resumable: false,
     metadata: {
       contentType: file.mimetype,
     },
@@ -451,7 +449,6 @@ const uploadFileToGCS = async (file) => {
     });
 
     blobStream.on('finish', () => {
-      // Make the uploaded file publicly accessible
       blob.makePublic().then(() => {
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
         console.log(`File uploaded to GCS: ${publicUrl}`);
@@ -473,7 +470,6 @@ const deleteFileFromGCS = async (fileUrl) => {
     return;
   }
 
-  // Extract filename from the GCS public URL
   const filename = fileUrl.substring(fileUrl.lastIndexOf('/') + 1);
   if (!filename) {
     console.warn('Could not extract filename from URL for GCS deletion:', fileUrl);
@@ -487,7 +483,6 @@ const deleteFileFromGCS = async (fileUrl) => {
     await blob.delete();
     console.log(`File ${filename} deleted from GCS bucket ${bucketName}.`);
   } catch (err) {
-    // If the file doesn't exist, GCS will return a 404, which is fine.
     if (err.code === 404) {
       console.warn(`File ${filename} not found in GCS bucket ${bucketName}.`);
     } else {
@@ -500,9 +495,8 @@ const deleteFileFromGCS = async (fileUrl) => {
 
 console.log('Defining POST /api/posts route...');
 // CREATE a new post (PROTECTED)
-// Use upload.single('thumbnail') to handle file upload from frontend
 app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body;
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText } = req.body;
   const author = req.user.username;
   const userId = req.user.id;
 
@@ -513,7 +507,6 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
   let finalThumbnailUrl = externalThumbnailUrl || '';
 
   if (req.file) {
-    // If a file was uploaded, upload it to GCS
     try {
       finalThumbnailUrl = await uploadFileToGCS(req.file);
     } catch (gcsErr) {
@@ -530,15 +523,15 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
       date: new Date().toISOString().split('T')[0],
       content,
       thumbnailUrl: finalThumbnailUrl,
+      thumbnailAltText: thumbnailAltText || '', // Save new field
+      metaDescription: metaDescription || '', // Save new field
       category: category || 'Other',
-      // slug will be generated by the pre-save hook
     });
 
     const savedPost = await newPost.save();
     res.status(201).json(savedPost);
   } catch (err) {
     console.error('Error creating post:', err);
-    // Handle duplicate slug error specifically
     if (err.code === 11000 && err.keyPattern && err.keyPattern.slug) {
       return res.status(409).json({ message: 'A post with a similar title already exists. Please choose a more unique title.' });
     }
@@ -549,7 +542,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
 console.log('Defining PUT /api/posts/:id route...');
 // UPDATE a post by ID (PROTECTED - only owner can update)
 app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl } = req.body;
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText } = req.body;
 
   try {
     const post = await Post.findById(req.params.id);
@@ -561,12 +554,10 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
       return res.status(403).json({ message: 'Unauthorized: You can only update your own posts.' });
     }
 
-    let finalThumbnailUrl = post.thumbnailUrl; // Default to existing URL
+    let finalThumbnailUrl = post.thumbnailUrl;
 
     if (req.file) {
-      // New file uploaded to GCS
       try {
-        // Delete old GCS file if it exists and was a GCS URL
         if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com')) {
           await deleteFileFromGCS(post.thumbnailUrl);
         }
@@ -576,16 +567,11 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
         return res.status(500).json({ message: 'Failed to upload new thumbnail.', details: gcsErr.message });
       }
     } else if (externalThumbnailUrl !== undefined) {
-      // If externalThumbnailUrl is explicitly provided (even if empty string), use it
-      // This handles cases where user clears the URL or provides a new one
       if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com') && externalThumbnailUrl === '') {
-        // If old was GCS and new is empty, delete from GCS
         await deleteFileFromGCS(post.thumbnailUrl);
       }
       finalThumbnailUrl = externalThumbnailUrl;
     }
-    // If neither req.file nor externalThumbnailUrl is provided, finalThumbnailUrl remains the old one.
-
 
     const updatedPost = await Post.findByIdAndUpdate(
       req.params.id,
@@ -593,8 +579,9 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
         title,
         content,
         thumbnailUrl: finalThumbnailUrl,
+        thumbnailAltText: thumbnailAltText, // Update new field
+        metaDescription: metaDescription, // Update new field
         category,
-        // slug will be generated by the pre-findOneAndUpdate hook if title is modified
       },
       { new: true, runValidators: true }
     );
@@ -605,7 +592,6 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
     if (err.kind === 'ObjectId') {
         return res.status(400).json({ message: 'Invalid Post ID format' });
     }
-    // Handle duplicate slug error specifically
     if (err.code === 11000 && err.keyPattern && err.keyPattern.slug) {
       return res.status(409).json({ message: 'A post with a similar title already exists. Please choose a more unique title.' });
     }
@@ -626,7 +612,6 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Unauthorized: You can only delete your own posts.' });
     }
 
-    // Delete associated thumbnail file from GCS if it's a GCS URL
     if (post.thumbnailUrl && post.thumbnailUrl.includes('storage.googleapis.com')) {
       await deleteFileFromGCS(post.thumbnailUrl);
     }
@@ -717,16 +702,73 @@ app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (r
   }
 });
 
+// --- Likes Routes ---
+console.log('Defining POST /api/posts/:postId/like route...');
+// Allow unauthenticated users to like a post
+app.post('/api/posts/:postId/like', authenticateToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user ? req.user.id : null; // Get userId if authenticated, else null
 
-// Serve static files from the React app in production
-// console.log('Defining static file serving for production...');
-// if (process.env.NODE_ENV === 'production') {
-//   app.use(express.static(path.join(__dirname, 'client/build')));
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found.' });
+    }
 
-//   app.get('*', (req, res) => {
-//     res.sendFile(path.resolve(__dirname, 'client', 'build', 'index.html'));
-//   });
-// }
+    if (userId) { // Authenticated user
+      if (post.likes.includes(userId)) {
+        return res.status(400).json({ message: 'You have already liked this post.' });
+      }
+      post.likes.push(userId);
+    } else { // Unauthenticated user
+      // For simplicity, we just increment anonymousLikeCount for unauthenticated users.
+      // This means an anonymous user can like multiple times if they clear local storage.
+      // To prevent this, a client-side UUID would need to be sent and stored in a separate array,
+      // which is more complex and out of scope for this immediate request.
+      post.anonymousLikeCount += 1;
+    }
+
+    await post.save();
+
+    const totalLikes = post.likes.length + post.anonymousLikeCount;
+    res.status(200).json({ message: 'Post liked successfully!', likesCount: totalLikes });
+  } catch (err) {
+    console.error('Error liking post:', err);
+    res.status(500).json({ message: 'Server error liking post.', details: err.message });
+  }
+});
+
+console.log('Defining DELETE /api/posts/:postId/like route...');
+// Only authenticated users can unlike a post
+app.delete('/api/posts/:postId/like', authenticateToken, async (req, res) => {
+  try {
+    // This route strictly requires authentication to unlike
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'Authentication required to unlike a post.' });
+    }
+    const { postId } = req.params;
+    const userId = req.user.id;
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found.' });
+    }
+
+    if (!post.likes.includes(userId)) {
+      return res.status(400).json({ message: 'You have not liked this post.' });
+    }
+
+    post.likes = post.likes.filter(id => id.toString() !== userId);
+    await post.save();
+
+    const totalLikes = post.likes.length + post.anonymousLikeCount;
+    res.status(200).json({ message: 'Post unliked successfully!', likesCount: totalLikes });
+  } catch (err) {
+    console.error('Error unliking post:', err);
+    res.status(500).json({ message: 'Server error unliking post.', details: err.message });
+  }
+});
+
 
 // Start the server
 console.log(`Starting server on port ${PORT}...`);
