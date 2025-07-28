@@ -23,6 +23,7 @@ app.use(helmet({
       scriptSrc: [
         "'self'",
         "https://cdn.jsdelivr.net",
+	"https://www.googletagmanager.com",
         "https://www.google-analytics.com",
       ],
       styleSrc: [
@@ -34,6 +35,8 @@ app.use(helmet({
         "'self'",
         "data:",
         "https://storage.googleapis.com",
+        "https://www.google-analytics.com",
+        "https://www.googletagmanager.com",
       ],
       fontSrc: [
         "'self'",
@@ -41,7 +44,9 @@ app.use(helmet({
       ],
       connectSrc: [
         "'self'",
-        "https://your-api-domain.com",
+        "https://samriddhi-blog-backend.onrender.com",
+        "https://www.google-analytics.com",
+        "https://www.googletagmanager.com",
       ],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
