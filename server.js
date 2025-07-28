@@ -115,8 +115,8 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Import the Post model from its new file (corrected path)
-const Post = require('./models/Post'); // Corrected path: assuming Post.js is in ./models relative to server.js
+// Import the Post model from its new file (corrected path for nested 'server' directory)
+const Post = require('./server/models/Post'); // Corrected path
 
 
 // Define Comment Schema and Model
