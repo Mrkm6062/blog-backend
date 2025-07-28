@@ -25,6 +25,8 @@ app.use(helmet({
         "https://cdn.jsdelivr.net",
 	"https://www.googletagmanager.com",
         "https://www.google-analytics.com",
+        "'sha256-14vn23JzwovE7zE9TPVyNnSO4RrT7Q7wR1PWxn0OVS4='", //tag
+        "'sha256-JmOAD1Hu8G+woGTyf1xYPkkmwU/tk02nYr+AO64YXxo='",
       ],
       styleSrc: [
         "'self'",
