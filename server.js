@@ -17,7 +17,62 @@ const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
-app.use(helmet()); // Add helmet middleware here
+
+// Configure Helmet with a more robust Content Security Policy
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"], // Only allow resources from your own domain by default
+      scriptSrc: [
+        "'self'",
+        "https://cdn.jsdelivr.net", // Example: If you use Bootstrap JS or other libraries from jsdelivr
+        "https://www.google-analytics.com", // Example: If you use Google Analytics
+        // IMPORTANT: Add all domains for any other third-party scripts your frontend uses
+        // If you have inline scripts, you might need 'unsafe-inline' (use with caution)
+        // or better, implement nonces or hashes for inline scripts.
+        // Example for inline scripts if unavoidable: "'unsafe-inline'"
+      ],
+      styleSrc: [
+        "'self'",
+        "https://fonts.googleapis.com", // Example: If you use Google Fonts
+        "'unsafe-inline'", // Often needed for inline styles or styled-components, try to minimize
+        // IMPORTANT: Add all domains for any other third-party stylesheets your frontend uses
+      ],
+      imgSrc: [
+        "'self'",
+        "data:", // Allows base64 encoded images
+        "https://storage.googleapis.com", // Allows images from your Google Cloud Storage bucket
+        // IMPORTANT: Add all domains for any other external image sources
+      ],
+      fontSrc: [
+        "'self'",
+        "https://fonts.gstatic.com", // Example: Google Fonts
+        // IMPORTANT: Add all domains for any other external font sources
+      ],
+      connectSrc: [
+        "'self'",
+        "https://your-api-domain.com", // If your frontend makes API calls to a different domain (e.g., your Render URL)
+        // IMPORTANT: Add all domains for any other external API calls or websocket connections
+      ],
+      objectSrc: ["'none'"], // Disallow <object>, <embed>, <applet>
+      mediaSrc: ["'self'"], // Disallow <audio>, <video> unless from 'self'
+      frameSrc: ["'self'"], // Disallow iframes unless from 'self'
+      // reportUri: '/csp-report-endpoint', // Uncomment and use a proper reporting service in production
+    },
+    reportOnly: true, // Set to 'false' or remove this line after testing to enforce the policy
+  },
+}));
+
+// Endpoint to receive CSP violation reports (for debugging and monitoring)
+app.post('/csp-report-endpoint', (req, res) => {
+  if (req.body && req.body['csp-report']) {
+    console.log('CSP Violation:', req.body['csp-report']);
+  } else {
+    console.log('CSP Report (no csp-report field):', req.body);
+  }
+  res.status(204).send(); // Respond with No Content
+});
+
 
 // --- Google Cloud Storage Setup ---
 let storageClient;
