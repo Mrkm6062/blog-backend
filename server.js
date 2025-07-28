@@ -15,64 +15,56 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-app.use(cors());
-app.use(express.json());
-
 // Configure Helmet with a more robust Content Security Policy
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc: ["'self'"], // Only allow resources from your own domain by default
+      defaultSrc: ["'self'"],
       scriptSrc: [
         "'self'",
-        "https://cdn.jsdelivr.net", // Example: If you use Bootstrap JS or other libraries from jsdelivr
-        "https://www.google-analytics.com", // Example: If you use Google Analytics
-        // IMPORTANT: Add all domains for any other third-party scripts your frontend uses
-        // If you have inline scripts, you might need 'unsafe-inline' (use with caution)
-        // or better, implement nonces or hashes for inline scripts.
-        // Example for inline scripts if unavoidable: "'unsafe-inline'"
+        "https://cdn.jsdelivr.net",
+        "https://www.google-analytics.com",
       ],
       styleSrc: [
         "'self'",
-        "https://fonts.googleapis.com", // Example: If you use Google Fonts
-        "'unsafe-inline'", // Often needed for inline styles or styled-components, try to minimize
-        // IMPORTANT: Add all domains for any other third-party stylesheets your frontend uses
+        "'unsafe-inline'",
+        "https://fonts.googleapis.com",
       ],
       imgSrc: [
         "'self'",
-        "data:", // Allows base64 encoded images
-        "https://storage.googleapis.com", // Allows images from your Google Cloud Storage bucket
-        // IMPORTANT: Add all domains for any other external image sources
+        "data:",
+        "https://storage.googleapis.com",
       ],
       fontSrc: [
         "'self'",
-        "https://fonts.gstatic.com", // Example: Google Fonts
-        // IMPORTANT: Add all domains for any other external font sources
+        "https://fonts.gstatic.com",
       ],
       connectSrc: [
         "'self'",
-        "https://your-api-domain.com", // If your frontend makes API calls to a different domain (e.g., your Render URL)
-        // IMPORTANT: Add all domains for any other external API calls or websocket connections
+        "https://your-api-domain.com",
       ],
-      objectSrc: ["'none'"], // Disallow <object>, <embed>, <applet>
-      mediaSrc: ["'self'"], // Disallow <audio>, <video> unless from 'self'
-      frameSrc: ["'self'"], // Disallow iframes unless from 'self'
-      // reportUri: '/csp-report-endpoint', // Uncomment and use a proper reporting service in production
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
     },
-    reportOnly: true, // Set to 'false' or remove this line after testing to enforce the policy
+    // Make sure this is false to enforce the policy:
+    reportOnly: false,
+  },
+  xContentTypeOptions: true,   // sets X-Content-Type-Options: nosniff
+  frameguard: { action: 'deny' }, // sets X-Frame-Options: DENY
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginResourcePolicy: { policy: "same-origin" },
+  permissionsPolicy: {
+    // Example: disable camera, microphone, geolocation
+    features: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+    },
   },
 }));
 
-// Endpoint to receive CSP violation reports (for debugging and monitoring)
-app.post('/csp-report-endpoint', (req, res) => {
-  if (req.body && req.body['csp-report']) {
-    console.log('CSP Violation:', req.body['csp-report']);
-  } else {
-    console.log('CSP Report (no csp-report field):', req.body);
-  }
-  res.status(204).send(); // Respond with No Content
-});
-
+app.use(cors());
+app.use(express.json());
 
 // --- Google Cloud Storage Setup ---
 let storageClient;
