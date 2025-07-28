@@ -1,15 +1,13 @@
 // server.js
-// const sitemapRoute = require('./routes/sitemap'); // Removed as requested
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const path = require('path'); // path module is already imported
+const path = require('path');
 const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { Storage } = require('@google-cloud/storage');
-const helmet = require('helmet'); // Import helmet
 
 dotenv.config();
 
@@ -18,9 +16,6 @@ const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
-app.use(helmet()); // Use helmet middleware
-// app.use('/', sitemapRoute); // Removed as requested
-
 
 // --- Google Cloud Storage Setup ---
 let storageClient;
@@ -79,7 +74,18 @@ mongoose.connect(mongoURI)
   .catch(err => console.error('MongoDB connection error:', err));
 
 // --- Mongoose Schemas and Models ---
-// Moved slugify and Post Schema/Model to models/Post.js
+const slugify = (text) => {
+  return text
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-');
+};
+
 // Define User Schema and Model
 const userSchema = new mongoose.Schema({
   username: {
@@ -115,9 +121,87 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Import the Post model using path.join and __dirname for robust resolution
-const Post = require(path.join(__dirname, 'models', 'Post'));
+// Define Blog Post Schema and Model
+const postSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  slug: {
+    type: String,
+    unique: true,
+    index: true,
+  },
+  author: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+  },
+  date: {
+    type: String,
+    required: true,
+  },
+  content: {
+    type: String,
+    required: true,
+  },
+  thumbnailUrl: {
+    type: String,
+    default: '',
+  },
+  thumbnailAltText: { // New field for thumbnail alt text
+    type: String,
+    default: '',
+    trim: true,
+  },
+  metaDescription: { // New field for meta description
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 160, // Common max length for meta descriptions
+  },
+  category: {
+    type: String,
+    enum: ['Fitness', 'Health', 'Travel', 'Fashion', 'Other'],
+    default: 'Other',
+    required: true,
+  },
+  likes: [{ // Array to store user IDs who liked the post (authenticated users)
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  anonymousLikeCount: { // New: Counter for likes from unauthenticated users
+    type: Number,
+    default: 0,
+  },
+}, {
+  timestamps: true,
+});
 
+// Pre-save hook to generate slug
+postSchema.pre('save', function(next) {
+  if (this.isModified('title') || this.isNew) {
+    this.slug = slugify(this.title);
+  }
+  next();
+});
+
+// Pre-findOneAndUpdate hook to generate slug on update
+postSchema.pre('findOneAndUpdate', function(next) {
+  const update = this.getUpdate();
+  if (update.title) {
+    update.slug = slugify(update.title);
+  }
+  next();
+});
+
+const Post = mongoose.model('Post', postSchema);
 
 // Define Comment Schema and Model
 const commentSchema = new mongoose.Schema({
@@ -326,10 +410,6 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
 
     // If not found by ID or not a valid ID, try to find by slug
     if (!post) {
-      // Your current Post schema does not have a 'slug' field.
-      // This part of the logic will always result in 'post' being undefined
-      // if the identifier is not a valid ObjectId.
-      // If you intend to use slugs, you need to add a 'slug' field to your Post schema.
       post = await Post.findOne({ slug: identifier });
     }
 
