@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { Storage } = require('@google-cloud/storage');
+const helmet = require('helmet'); // Import helmet
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
+app.use(helmet()); // Add helmet middleware here
 
 // --- Google Cloud Storage Setup ---
 let storageClient;
@@ -410,6 +412,10 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
 
     // If not found by ID or not a valid ID, try to find by slug
     if (!post) {
+      // Your current Post schema does not have a 'slug' field.
+      // This part of the logic will always result in 'post' being undefined
+      // if the identifier is not a valid ObjectId.
+      // If you intend to use slugs, you need to add a 'slug' field to your Post schema.
       post = await Post.findOne({ slug: identifier });
     }
 
