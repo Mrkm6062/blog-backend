@@ -3,7 +3,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const path = require('path');
+const path = require('path'); // path module is already imported
 const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -115,8 +115,8 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Import the Post model from its new file (corrected path)
-const Post = require('./models/Post'); // Corrected path: assuming Post.js is in ./models relative to server.js
+// Import the Post model using path.join and __dirname for robust resolution
+const Post = require(path.join(__dirname, 'models', 'Post'));
 
 
 // Define Comment Schema and Model
