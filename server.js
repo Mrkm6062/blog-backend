@@ -1,4 +1,5 @@
 // server.js
+const sitemapRoute = require('./routes/sitemap');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -8,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { Storage } = require('@google-cloud/storage');
+const helmet = require('helmet'); // Import helmet
 
 dotenv.config();
 
@@ -16,6 +18,9 @@ const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
+app.use(helmet()); // Use helmet middleware
+app.use('/', sitemapRoute);
+
 
 // --- Google Cloud Storage Setup ---
 let storageClient;
@@ -201,7 +206,8 @@ postSchema.pre('findOneAndUpdate', function(next) {
   next();
 });
 
-const Post = mongoose.model('Post', postSchema);
+const Post = require('./models/Post');
+
 
 // Define Comment Schema and Model
 const commentSchema = new mongoose.Schema({
