@@ -1,7 +1,8 @@
 // routes/sitemap.js
 const express = require('express');
 const router = express.Router();
-const Post = require('../models/Post'); // Correct path to the Post model
+// Corrected path to the Post model, assuming it's in server/models/Post.js
+const Post = require('../server/models/Post');
 
 // Example sitemap route (adjust as per your actual sitemap logic)
 router.get('/sitemap.xml', async (req, res) => {
