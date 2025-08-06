@@ -290,6 +290,34 @@ const commentSchema = new mongoose.Schema({
 
 const Comment = mongoose.model('Comment', commentSchema);
 
+// --- NEW: Support Ticket Schema and Model ---
+const supportTicketSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  email: {
+    type: String,
+    required: true,
+    trim: true,
+    lowercase: true,
+  },
+  message: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  // You might add fields like status (e.g., 'open', 'closed'), assignedTo, etc.
+  // status: { type: String, default: 'open' },
+  // assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+}, {
+  timestamps: true, // Adds createdAt and updatedAt fields
+});
+
+const SupportTicket = mongoose.model('SupportTicket', supportTicketSchema);
+
+
 // --- Authentication Middleware ---
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -386,6 +414,40 @@ app.post('/api/login', async (req, res) => {
   } catch (err) {
     console.error('Error during login:', err);
     res.status(500).json({ message: 'Server error during login.', details: err.message });
+  }
+});
+
+// --- Support Contact Form Endpoint ---
+console.log('Defining POST /api/support route...');
+app.post('/api/support', async (req, res) => {
+  const { name, email, message } = req.body;
+
+  if (!name || !email || !message) {
+    return res.status(400).json({ message: 'Name, email, and message are required for support contact.' });
+  }
+
+  try {
+    // Create a new SupportTicket instance
+    const newTicket = new SupportTicket({
+      name,
+      email,
+      message,
+    });
+
+    // Save the new ticket to the database
+    await newTicket.save();
+
+    console.log('--- New Support Message Received and Saved ---');
+    console.log(`Ticket ID: ${newTicket._id}`);
+    console.log(`Name: ${name}`);
+    console.log(`Email: ${email}`);
+    console.log(`Message: ${message}`);
+    console.log('------------------------------------');
+
+    res.status(200).json({ message: 'Your support message has been received and saved successfully!' });
+  } catch (err) {
+    console.error('Error handling support message:', err);
+    res.status(500).json({ message: 'Server error processing support message.', details: err.message });
   }
 });
 
@@ -682,7 +744,7 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error deleting post:', err);
     if (err.kind === 'ObjectId') {
-        return res.status(400).json({ message: 'Invalid Post ID format' });
+      return res.status(400).json({ message: 'Invalid Post ID format' });
     }
     res.status(500).json({ message: 'Server error' });
   }
