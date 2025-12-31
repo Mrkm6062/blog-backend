@@ -1,5 +1,4 @@
 // server.js
-const sitemapRoute = require('./routes/sitemap');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -21,7 +20,6 @@ app.use(cors());
 app.use(express.json());
 app.use(helmet()); // Use helmet middleware
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use('/', sitemapRoute);
 
 
 // --- Google Cloud Storage Setup ---
@@ -208,7 +206,7 @@ postSchema.pre('findOneAndUpdate', function(next) {
   next();
 });
 
-const Post = require('./models/Post');
+const Post = mongoose.model('Post', postSchema);
 
 
 // Define Comment Schema and Model
@@ -241,6 +239,9 @@ const commentSchema = new mongoose.Schema({
 });
 
 const Comment = mongoose.model('Comment', commentSchema);
+
+const sitemapRoute = require('./routes/sitemap');
+app.use('/', sitemapRoute);
 
 // --- Authentication Middleware ---
 const authenticateToken = (req, res, next) => {

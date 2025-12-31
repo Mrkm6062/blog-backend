@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const Post = require('../models/Post'); // Adjust if needed
+const mongoose = require('mongoose');
 
 router.get('/sitemap.xml', async (req, res) => {
   try {
     const baseUrl = 'http://localhost:3000'; // Your frontend base URL
 
+    const Post = mongoose.model('Post');
     const posts = await Post.find({}, 'slug updatedAt date');
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
