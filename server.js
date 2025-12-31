@@ -433,19 +433,11 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
 });
 
 
-// Helper function to upload file (GCS or Local Fallback)
+// Helper function to upload file (GCS Only)
 const uploadFile = async (file) => {
   if (!storageClient || !bucketName) {
-    console.warn('GCS not configured. Falling back to local storage.');
-    const uploadsDir = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-    const uniqueFilename = `${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`;
-    const filePath = path.join(uploadsDir, uniqueFilename);
-    
-    await fs.promises.writeFile(filePath, file.buffer);
-    return `/uploads/${uniqueFilename}`;
+    console.error('GCS not configured. Image uploads are disabled.');
+    throw new Error('Google Cloud Storage is not configured. Cannot upload file.');
   }
 
   const bucket = storageClient.bucket(bucketName);
