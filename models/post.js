@@ -1,5 +1,3 @@
-// server/models/Post.js (or wherever your Post model is defined)
-
 const mongoose = require('mongoose');
 
 const postSchema = new mongoose.Schema({
@@ -19,11 +17,11 @@ const postSchema = new mongoose.Schema({
   },
   thumbnailUrl: { // New field for thumbnail image URL
     type: String,
-    default: '', // Optional: provide a default empty string
+    default: '',
   },
   category: { // New field for category
     type: String,
-    default: 'Other', // Optional: provide a default category
+    default: 'Other',
   },
   date: {
     type: Date,
@@ -47,4 +45,5 @@ const postSchema = new mongoose.Schema({
   ],
 });
 
-module.exports = mongoose.model('Post', postSchema);
+// ✅ Prevent OverwriteModelError during hot reloads or multiple imports
+module.exports = mongoose.models.Post || mongoose.model('Post', postSchema);
