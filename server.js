@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { Storage } = require('@google-cloud/storage');
 const helmet = require('helmet'); // Import helmet
+const nodemailer = require('nodemailer');
 
 dotenv.config();
 
@@ -791,6 +792,41 @@ app.delete('/api/posts/:postId/like', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error unliking post:', err);
     res.status(500).json({ message: 'Server error unliking post.', details: err.message });
+  }
+});
+
+console.log('Defining POST /api/support route...');
+// Support Message Route
+app.post('/api/support', async (req, res) => {
+  const { name, email, subject, message } = req.body;
+
+  if (!name || !email || !message) {
+    return res.status(400).json({ message: 'Name, email, and message are required.' });
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: 'info.theskyfacts@gmail.com',
+      subject: subject || `New Support Message from ${name}`,
+      text: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`,
+      html: `<p><strong>Name:</strong> ${name}</p><p><strong>Email:</strong> ${email}</p><p><strong>Message:</strong><br/>${message}</p>`,
+      replyTo: email,
+    };
+
+    await transporter.sendMail(mailOptions);
+    res.status(200).json({ message: 'Message sent successfully!' });
+  } catch (error) {
+    console.error('Error sending support email:', error);
+    res.status(500).json({ message: 'Failed to send message.', details: error.message });
   }
 });
 
