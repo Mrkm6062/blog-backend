@@ -174,7 +174,7 @@ const postSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['Fitness', 'Health', 'Travel', 'Fashion', 'Other'],
+    enum: ['Fitness', 'Health', 'Travel', 'Fashion', 'Other', 'Technology', 'Personal Finance', 'Lifestyle', 'Travels Blog', 'How-To-Guides', 'Software Tools', 'AI & Automation', 'Internet & Networking'],
     default: 'Other',
     required: true,
   },
