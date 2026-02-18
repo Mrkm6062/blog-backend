@@ -19,7 +19,18 @@ const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
-app.use(helmet()); // Use helmet middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https://storage.googleapis.com"],
+      connectSrc: ["'self'", "https://samriddhishop.info", "https://cloudflareinsights.com"],
+    },
+  },
+})); // Use helmet middleware with custom CSP
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
