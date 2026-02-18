@@ -818,6 +818,11 @@ app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Post not found' });
     }
 
+    const existingComment = await Comment.findOne({ postId, userId });
+    if (existingComment) {
+      return res.status(400).json({ message: 'You have already commented on this post.' });
+    }
+
     const newComment = new Comment({
       postId,
       author,
@@ -874,31 +879,19 @@ app.post('/api/posts/:postId/like', authenticateToken, async (req, res) => {
     }
 
     if (userId) { // Authenticated user
-      if (post.likes.includes(userId)) {
+      if (post.likes.map(id => id.toString()).includes(userId)) {
         return res.status(400).json({ message: 'You have already liked this post.' });
       }
       post.likes.push(userId);
     } else { // Unauthenticated user
-      // For simplicity, we just increment anonymousLikeCount for unauthenticated users.
-      // This means an anonymous user can like multiple times if they clear local storage.
-      // To prevent this, a client-side UUID would need to be sent and stored in a separate array,
-      // which is more complex and out of scope for this immediate request.
-      post.anonymousLikeCount += 1;
+      return res.status(401).json({ message: 'You must be logged in to like posts.' });
     }
 
     await post.save();
 
     const totalLikes = post.likes.length + post.anonymousLikeCount;
     res.status(200).json({ message: 'Post liked successfully!', likesCount: totalLikes });
-  } catch (err) {
-    console.error('Error liking post:', err);
-    res.status(500).json({ message: 'Server error liking post.', details: err.message });
-  }
-});
-
-console.log('Defining DELETE /api/posts/:postId/like route...');
-// Only authenticated users can unlike a post
-app.delete('/api/posts/:postId/like', authenticateToken, async (req, res) => {
+  }  catch (err) {
   try {
     // This route strictly requires authentication to unlike
     if (!req.user || !req.user.id) {
