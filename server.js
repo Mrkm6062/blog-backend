@@ -11,6 +11,7 @@ const multer = require('multer');
 const { Storage } = require('@google-cloud/storage');
 const helmet = require('helmet'); // Import helmet
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 dotenv.config();
 
@@ -133,6 +134,8 @@ const userSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  resetPasswordToken: String,
+  resetPasswordExpires: Date,
 }, {
   timestamps: true,
 });
@@ -392,6 +395,81 @@ app.post('/api/login', async (req, res) => {
   } catch (err) {
     console.error('Error during login:', err);
     res.status(500).json({ message: 'Server error during login.', details: err.message });
+  }
+});
+
+console.log('Defining POST /api/forgot-password route...');
+// Forgot Password Route
+app.post('/api/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'User with that email does not exist.' });
+    }
+
+    // Generate token
+    const token = crypto.randomBytes(20).toString('hex');
+    user.resetPasswordToken = token;
+    user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+
+    await user.save();
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    // Construct reset URL (Assuming frontend handles /reset-password route)
+    // Note: Adjust the domain if running locally or in production
+    const resetUrl = `https://samriddhishop.info/reset-password?token=${token}`;
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: 'Password Reset Request',
+      text: `You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\n` +
+        `Please click on the following link, or paste this into your browser to complete the process:\n\n` +
+        `${resetUrl}\n\n` +
+        `If you did not request this, please ignore this email and your password will remain unchanged.\n`,
+    };
+
+    await transporter.sendMail(mailOptions);
+    res.status(200).json({ message: 'Password reset email sent.' });
+
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ message: 'Server error processing request.' });
+  }
+});
+
+console.log('Defining POST /api/reset-password route...');
+// Reset Password Route
+app.post('/api/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+  try {
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Password reset token is invalid or has expired.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+
+    await user.save();
+    res.status(200).json({ message: 'Password has been updated successfully.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ message: 'Server error resetting password.' });
   }
 });
 
