@@ -234,6 +234,10 @@ const postSchema = new mongoose.Schema({
   type: Boolean,
   default: true,
   },
+  canonicalUrl: {
+    type: String,
+    trim: true,
+  },
 }, {
   timestamps: true,
 });
@@ -570,7 +574,7 @@ const deleteFile = async (fileUrl) => {
 console.log('Defining POST /api/posts route...');
 // CREATE a new post (PROTECTED)
 app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed } = req.body;
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed, canonicalUrl } = req.body;
   const author = req.user.username;
   const userId = req.user.id;
 
@@ -632,6 +636,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
       excerpt: excerpt || '',
       readingTime,
       isIndexed: isIndexed === undefined ? true : (isIndexed === 'true' || isIndexed === true),
+      canonicalUrl: canonicalUrl || '',
     });
 
     const savedPost = await newPost.save();
@@ -648,7 +653,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
 console.log('Defining PUT /api/posts/:id route...');
 // UPDATE a post by ID (PROTECTED - only owner can update)
 app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed } = req.body;
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed, canonicalUrl } = req.body;
 
   try {
     const post = await Post.findById(req.params.id);
@@ -723,6 +728,7 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
         excerpt,
         readingTime,
         isIndexed: isIndexed === undefined ? undefined : (isIndexed === 'true' || isIndexed === true),
+        canonicalUrl,
       },
       { new: true, runValidators: true }
     );
