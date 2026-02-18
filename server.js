@@ -425,7 +425,8 @@ app.post('/api/forgot-password', async (req, res) => {
 
     // Construct reset URL (Assuming frontend handles /reset-password route)
     // Note: Adjust the domain if running locally or in production
-    const resetUrl = `https://samriddhishop.info/reset-password?token=${token}`;
+    const clientUrl = process.env.CLIENT_URL || 'https://samriddhishop.info';
+    const resetUrl = `${clientUrl}/reset-password?token=${token}`;
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
