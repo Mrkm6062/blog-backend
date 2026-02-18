@@ -22,6 +22,7 @@ app.use(express.json());
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
+      upgradeInsecureRequests: [],
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
