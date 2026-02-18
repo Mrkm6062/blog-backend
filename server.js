@@ -478,6 +478,11 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
+
+    // Increment view count
+    post.viewCount = (post.viewCount || 0) + 1;
+    await post.save();
+
     res.json(post);
   } catch (err) {
     console.error('Error fetching single post by identifier:', err);
