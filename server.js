@@ -219,8 +219,8 @@ const postSchema = new mongoose.Schema({
   trim: true,
   maxlength: 300,
   },
-  readingTime: {
-  type: Number, // in minutes
+ readingTime: {
+  type: Number,
   },
   viewCount: {
   type: Number,
@@ -481,11 +481,15 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
 
     // Increment view count only if requested (default to true)
     if (req.query.incrementView !== 'false') {
-      post.viewCount = (post.viewCount || 0) + 1;
-      await post.save();
+      post = await Post.findByIdAndUpdate(
+        post._id,
+        { $inc: { viewCount: 1 } },
+        { new: true }
+      );
     }
 
     res.json(post);
+
   } catch (err) {
     console.error('Error fetching single post by identifier:', err);
     res.status(500).json({ message: 'Server error' });
