@@ -479,9 +479,11 @@ app.get('/api/posts/detail/:identifier', async (req, res) => {
       return res.status(404).json({ message: 'Post not found' });
     }
 
-    // Increment view count
-    post.viewCount = (post.viewCount || 0) + 1;
-    await post.save();
+    // Increment view count only if requested (default to true)
+    if (req.query.incrementView !== 'false') {
+      post.viewCount = (post.viewCount || 0) + 1;
+      await post.save();
+    }
 
     res.json(post);
   } catch (err) {
