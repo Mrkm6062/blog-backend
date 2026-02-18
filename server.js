@@ -891,7 +891,14 @@ app.post('/api/posts/:postId/like', authenticateToken, async (req, res) => {
 
     const totalLikes = post.likes.length + post.anonymousLikeCount;
     res.status(200).json({ message: 'Post liked successfully!', likesCount: totalLikes });
-  }  catch (err) {
+  } catch (err) {
+    console.error('Error liking post:', err);
+    res.status(500).json({ message: 'Server error liking post.', details: err.message });
+  }
+});
+
+console.log('Defining DELETE /api/posts/:postId/like route...');
+app.delete('/api/posts/:postId/like', authenticateToken, async (req, res) => {
   try {
     // This route strictly requires authentication to unlike
     if (!req.user || !req.user.id) {
