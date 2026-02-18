@@ -134,6 +134,16 @@ const postSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  seoTitle: {
+  type: String,
+  trim: true,
+  maxlength: 60,
+  },
+  schemaType: {
+  type: String,
+  enum: ['Article', 'BlogPosting', 'NewsArticle'],
+  default: 'BlogPosting',
+  },
   slug: {
     type: String,
     unique: true,
@@ -172,19 +182,45 @@ const postSchema = new mongoose.Schema({
     trim: true,
     maxlength: 160, // Common max length for meta descriptions
   },
+  focusKeyword: {
+  type: String,
+  trim: true,
+  index: true,
+  },
   category: {
     type: String,
     enum: ['Fitness', 'Health', 'Travel', 'Fashion', 'Other', 'Technology', 'Personal Finance', 'Lifestyle', 'Travels Blog', 'How-To-Guides', 'Software Tools', 'AI & Automation', 'Internet & Networking'],
     default: 'Other',
     required: true,
   },
+  tags: [{
+  type: String,
+  trim: true,
+  index: true,
+  }],
+  faqSchema: [{
+  question: String,
+  answer: String,
+  }],
+  excerpt: {
+  type: String,
+  trim: true,
+  maxlength: 300,
+  },
+  readingTime: {
+  type: Number, // in minutes
+  },
+  viewCount: {
+  type: Number,
+  default: 0,
+  },
   likes: [{ // Array to store user IDs who liked the post (authenticated users)
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
-  anonymousLikeCount: { // New: Counter for likes from unauthenticated users
-    type: Number,
-    default: 0,
+  isIndexed: {
+  type: Boolean,
+  default: true,
   },
 }, {
   timestamps: true,
@@ -522,7 +558,7 @@ const deleteFile = async (fileUrl) => {
 console.log('Defining POST /api/posts route...');
 // CREATE a new post (PROTECTED)
 app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText } = req.body;
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed } = req.body;
   const author = req.user.username;
   const userId = req.user.id;
 
@@ -541,6 +577,30 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
     }
   }
 
+  // Calculate reading time
+  const wpm = 200;
+  const words = content ? content.trim().split(/\s+/).length : 0;
+  const readingTime = Math.ceil(words / wpm);
+
+  // Parse complex fields if they come as strings (FormData)
+  let parsedTags = tags;
+  if (typeof tags === 'string') {
+    try {
+      parsedTags = JSON.parse(tags);
+    } catch (e) {
+      parsedTags = tags.split(',').map(t => t.trim());
+    }
+  }
+
+  let parsedFaqSchema = faqSchema;
+  if (typeof faqSchema === 'string') {
+    try {
+      parsedFaqSchema = JSON.parse(faqSchema);
+    } catch (e) {
+      parsedFaqSchema = [];
+    }
+  }
+
   try {
     const newPost = new Post({
       title,
@@ -552,6 +612,14 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
       thumbnailAltText: thumbnailAltText || '', // Save new field
       metaDescription: metaDescription || '', // Save new field
       category: category || 'Other',
+      seoTitle: seoTitle || '',
+      focusKeyword: focusKeyword || '',
+      tags: parsedTags || [],
+      schemaType: schemaType || 'BlogPosting',
+      faqSchema: parsedFaqSchema || [],
+      excerpt: excerpt || '',
+      readingTime,
+      isIndexed: isIndexed === undefined ? true : (isIndexed === 'true' || isIndexed === true),
     });
 
     const savedPost = await newPost.save();
@@ -568,7 +636,7 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
 console.log('Defining PUT /api/posts/:id route...');
 // UPDATE a post by ID (PROTECTED - only owner can update)
 app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
-  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText } = req.body;
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed } = req.body;
 
   try {
     const post = await Post.findById(req.params.id);
@@ -599,6 +667,33 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
       finalThumbnailUrl = externalThumbnailUrl;
     }
 
+    // Calculate reading time if content is present
+    let readingTime;
+    if (content) {
+      const wpm = 200;
+      const words = content.trim().split(/\s+/).length;
+      readingTime = Math.ceil(words / wpm);
+    }
+
+    // Parse complex fields
+    let parsedTags = tags;
+    if (typeof tags === 'string') {
+      try {
+        parsedTags = JSON.parse(tags);
+      } catch (e) {
+        parsedTags = tags.split(',').map(t => t.trim());
+      }
+    }
+
+    let parsedFaqSchema = faqSchema;
+    if (typeof faqSchema === 'string') {
+      try {
+        parsedFaqSchema = JSON.parse(faqSchema);
+      } catch (e) {
+        parsedFaqSchema = [];
+      }
+    }
+
     const updatedPost = await Post.findByIdAndUpdate(
       req.params.id,
       {
@@ -608,6 +703,14 @@ app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (
         thumbnailAltText: thumbnailAltText, // Update new field
         metaDescription: metaDescription, // Update new field
         category,
+        seoTitle,
+        focusKeyword,
+        tags: parsedTags,
+        schemaType,
+        faqSchema: parsedFaqSchema,
+        excerpt,
+        readingTime,
+        isIndexed: isIndexed === undefined ? undefined : (isIndexed === 'true' || isIndexed === true),
       },
       { new: true, runValidators: true }
     );
