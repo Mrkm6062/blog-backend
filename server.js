@@ -24,11 +24,11 @@ app.use(helmet({
     directives: {
       upgradeInsecureRequests: [],
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https://storage.googleapis.com"],
-      connectSrc: ["'self'", "https://samriddhishop.info", "https://cloudflareinsights.com"],
+      connectSrc: ["'self'", "https://samriddhishop.info"],
     },
   },
 })); // Use helmet middleware with custom CSP
