@@ -740,6 +740,105 @@ app.post('/api/posts', authenticateToken, upload.single('thumbnail'), async (req
   }
 });
 
+// CREATE Automation Blog Post
+app.post('/api/AIposts', authenticateToken, upload.single('thumbnail'), async (req, res) => {
+  let user = req.user;
+
+  // API Key Authentication for N8N
+  if (!user && process.env.N8N_API_KEY && req.headers['x-api-key'] === process.env.N8N_API_KEY) {
+    try {
+      if (req.body.userId) {
+        const dbUser = await User.findById(req.body.userId);
+        if (dbUser) user = { id: dbUser._id, username: dbUser.username };
+      } else if (req.body.author) {
+        const dbUser = await User.findOne({ username: req.body.author });
+        if (dbUser) user = { id: dbUser._id, username: dbUser.username };
+      }
+    } catch (err) {
+      console.error('Error authenticating via API Key:', err);
+    }
+  }
+
+  if (!user) {
+    return res.status(401).json({ message: 'Unauthorized. Please provide a valid token or API key with User ID/Author.' });
+  }
+
+  const { title, content, category, thumbnailUrl: externalThumbnailUrl, metaDescription, thumbnailAltText, seoTitle, focusKeyword, tags, schemaType, faqSchema, excerpt, isIndexed, canonicalUrl } = req.body;
+  const author = user.username;
+  const userId = user.id;
+
+  if (!title || !content) {
+    return res.status(400).json({ message: 'Please enter all fields: title and content.' });
+  }
+
+  let finalThumbnailUrl = externalThumbnailUrl || '';
+
+  if (req.file) {
+    try {
+      finalThumbnailUrl = await uploadFile(req.file);
+    } catch (gcsErr) {
+      console.error('Failed to upload thumbnail during post creation:', gcsErr);
+      return res.status(500).json({ message: 'Failed to upload thumbnail.', details: gcsErr.message });
+    }
+  }
+
+  // Calculate reading time
+  const wpm = 200;
+  const words = content ? content.trim().split(/\s+/).length : 0;
+  const readingTime = Math.ceil(words / wpm);
+
+  // Parse complex fields if they come as strings (FormData)
+  let parsedTags = tags;
+  if (typeof tags === 'string') {
+    try {
+      parsedTags = JSON.parse(tags);
+    } catch (e) {
+      parsedTags = tags.split(',').map(t => t.trim());
+    }
+  }
+
+  let parsedFaqSchema = faqSchema;
+  if (typeof faqSchema === 'string') {
+    try {
+      parsedFaqSchema = JSON.parse(faqSchema);
+    } catch (e) {
+      parsedFaqSchema = [];
+    }
+  }
+
+  try {
+    const newPost = new Post({
+      title,
+      author,
+      userId,
+      date: new Date().toISOString().split('T')[0],
+      content,
+      thumbnailUrl: finalThumbnailUrl,
+      thumbnailAltText: thumbnailAltText || '', // Save new field
+      metaDescription: metaDescription || '', // Save new field
+      category: category || 'Other',
+      seoTitle: seoTitle || '',
+      focusKeyword: focusKeyword || '',
+      tags: parsedTags || [],
+      schemaType: schemaType || 'BlogPosting',
+      faqSchema: parsedFaqSchema || [],
+      excerpt: excerpt || '',
+      readingTime,
+      isIndexed: isIndexed === undefined ? true : (isIndexed === 'true' || isIndexed === true),
+      canonicalUrl: canonicalUrl || '',
+    });
+
+    const savedPost = await newPost.save();
+    res.status(201).json(savedPost);
+  } catch (err) {
+    console.error('Error creating post:', err);
+    if (err.code === 11000 && err.keyPattern && err.keyPattern.slug) {
+      return res.status(409).json({ message: 'A post with a similar title already exists. Please choose a more unique title.' });
+    }
+    res.status(500).json({ message: 'Server error', details: err.message });
+  }
+});
+
 console.log('Defining PUT /api/posts/:id route...');
 // UPDATE a post by ID (PROTECTED - only owner can update)
 app.put('/api/posts/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
